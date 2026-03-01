@@ -1,24 +1,26 @@
 # PatternFinder Habit Consistency POC
 
-Web-first habit tracker MVP built with Next.js + Supabase. The project is structured to share domain logic with a future React Native Expo iOS app.
+Web-first habit tracker built with Next.js + Supabase. The codebase is currently aligned to the Phase B `agents.md` source of truth.
 
-## Features implemented
+## Phase B scope (current)
 
 - Email/password auth with Supabase
-- Habit CRUD with flexible schedules:
-  - `daily`
-  - `weekdays`
-  - `custom_days`
-  - `times_per_week`
-- Daily checklist with optimistic toggle updates
-- User timezone + cutoff-aware daily date resolution
-- Daily summaries (completion %, streak, token usage, XP/level)
-- Streak protection tokens
-- Reward contracts and unlock/redeem flow (honor system)
-- Daily and weekly report APIs + report UI
-- Badge awarding engine
-- Supabase row-level security policies
-- Hourly day-rollover RPC entrypoint for edge cron
+- Core schema alignment to:
+  - `profiles`
+  - `habits`
+  - `habit_logs`
+- Habit CRUD using Phase B fields:
+  - `name`, `description`, `frequency_type`, `target_threshold`
+- Today checklist using binary completion logs (`habit_logs.value = 1.0`)
+- Timezone + `cutoff_time` based effective day logic
+- 80% streak rule with protection-token aware streak computation
+- Daily and weekly consistency reports computed from habits + logs
+- RLS-enabled tables and ownership-safe queries
+
+## Not active in Phase B
+
+- Rewards/contracts APIs and UI are intentionally disabled (Phase C)
+- XP/levels/badges pipeline from earlier scaffolding is not used in this phase
 
 ## Routes
 
@@ -26,20 +28,19 @@ Web-first habit tracker MVP built with Next.js + Supabase. The project is struct
 - `/today`
 - `/habits`
 - `/reports`
-- `/rewards`
+- `/rewards` (placeholder for Phase C)
 - `/settings`
 
 ## API
 
 - `GET/POST /api/habits`
 - `PATCH/DELETE /api/habits/:id`
-- `POST /api/day-instances/:id/toggle`
+- `POST /api/day-instances/:id/toggle` (toggles today log for habit id)
 - `GET /api/reports/daily?start&end`
 - `GET /api/reports/weekly?weeks=n`
-- `GET/POST /api/rewards/contracts`
-- `PATCH /api/rewards/contracts/:id`
-- `POST /api/rewards/:unlockId/redeem`
 - `GET/PATCH /api/settings`
+
+Rewards endpoints currently return `410` in Phase B.
 
 ## Setup
 
@@ -55,12 +56,12 @@ npm install
 cp .env.example .env.local
 ```
 
-3. Fill in Supabase values in `.env.local`.
+3. Fill Supabase values in `.env.local`.
 
-4. Apply migration:
+4. Apply migrations:
 
 ```bash
-supabase db push
+npx supabase@latest db push
 ```
 
 5. Run app:
@@ -69,31 +70,13 @@ supabase db push
 npm run dev
 ```
 
-## Supabase edge functions
-
-Included functions:
-
-- `supabase/functions/day-rollover`
-- `supabase/functions/on-user-created`
-
-Deploy example:
-
-```bash
-supabase functions deploy day-rollover
-supabase functions deploy on-user-created
-```
-
-Schedule `day-rollover` hourly using Supabase scheduled functions or an external cron.
-
 ## Testing
 
 ```bash
+npm run typecheck
 npm run test
-npm run test:e2e
 ```
-
-Current tests include domain unit tests, integration flow tests, and Playwright scaffolding.
 
 ## Shared domain package
 
-`packages/domain` contains portable scheduling/streak/reward/time logic for reuse by a future React Native Expo client.
+`packages/domain` contains portable schedule/time/streak utilities for future web/mobile reuse.

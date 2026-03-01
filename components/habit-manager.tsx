@@ -5,60 +5,44 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 interface HabitItem {
   id: string;
-  title: string;
-  notes: string | null;
-  schedule_type: "daily" | "weekdays" | "custom_days" | "times_per_week";
-  schedule_config: {
-    daysOfWeek?: number[];
-    timesPerWeek?: number;
-    preferredDays?: number[];
-  };
+  name: string;
+  description: string | null;
+  frequency_type: "daily" | "weekdays" | "weekends";
+  target_threshold: number;
 }
 
-const weekdays = [
-  { label: "Sun", value: 0 },
-  { label: "Mon", value: 1 },
-  { label: "Tue", value: 2 },
-  { label: "Wed", value: 3 },
-  { label: "Thu", value: 4 },
-  { label: "Fri", value: 5 },
-  { label: "Sat", value: 6 }
-];
+const frequencyLabels: Record<HabitItem["frequency_type"], string> = {
+  daily: "Every day",
+  weekdays: "Weekdays (Mon-Fri)",
+  weekends: "Weekends (Sat-Sun)"
+};
 
 export function HabitManager({ initialHabits }: { initialHabits: HabitItem[] }) {
   const queryClient = useQueryClient();
   const queryKey = ["habits"];
 
-  const { data: habits } = useQuery({
+  const { data: habits = [] } = useQuery({
     queryKey,
     queryFn: async () => initialHabits,
     initialData: initialHabits
   });
 
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
-  const [scheduleType, setScheduleType] = useState<HabitItem["schedule_type"]>("daily");
-  const [customDays, setCustomDays] = useState<number[]>([1, 3, 5]);
-  const [timesPerWeek, setTimesPerWeek] = useState(3);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [frequencyType, setFrequencyType] = useState<HabitItem["frequency_type"]>("daily");
+  const [targetThreshold, setTargetThreshold] = useState(0.8);
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const payload = {
-        title,
-        notes: notes.trim() ? notes.trim() : null,
-        scheduleType,
-        scheduleConfig:
-          scheduleType === "custom_days"
-            ? { daysOfWeek: customDays }
-            : scheduleType === "times_per_week"
-              ? { timesPerWeek, preferredDays: [1, 2, 3, 4, 5, 6, 0] }
-              : {}
-      };
-
       const response = await fetch("/api/habits", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          name,
+          description: description.trim() ? description.trim() : null,
+          frequencyType,
+          targetThreshold
+        })
       });
 
       if (!response.ok) {
@@ -70,9 +54,10 @@ export function HabitManager({ initialHabits }: { initialHabits: HabitItem[] }) 
     },
     onSuccess: (result) => {
       queryClient.setQueryData<HabitItem[]>(queryKey, (current = []) => [...current, result.habit]);
-      setTitle("");
-      setNotes("");
-      setScheduleType("daily");
+      setName("");
+      setDescription("");
+      setFrequencyType("daily");
+      setTargetThreshold(0.8);
     }
   });
 
@@ -94,21 +79,11 @@ export function HabitManager({ initialHabits }: { initialHabits: HabitItem[] }) 
     }
   });
 
-  const schedulePreview = useMemo(() => {
-    if (scheduleType === "daily") return "Every day";
-    if (scheduleType === "weekdays") return "Weekdays (Mon-Fri)";
-    if (scheduleType === "custom_days") {
-      return `Custom days: ${customDays
-        .sort((a, b) => a - b)
-        .map((value) => weekdays.find((day) => day.value === value)?.label ?? value)
-        .join(", ")}`;
-    }
-    return `${timesPerWeek}x weekly`;
-  }, [customDays, scheduleType, timesPerWeek]);
+  const schedulePreview = useMemo(() => frequencyLabels[frequencyType], [frequencyType]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!title.trim()) return;
+    if (!name.trim()) return;
     await createMutation.mutateAsync();
   };
 
@@ -119,69 +94,41 @@ export function HabitManager({ initialHabits }: { initialHabits: HabitItem[] }) 
         <form onSubmit={onSubmit} className="stack-form">
           <label>
             Habit name
-            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Go to the gym" required />
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Go to the gym" required />
           </label>
           <label>
-            Notes
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional habit notes" />
+            Description
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Optional context for this habit"
+            />
           </label>
           <label>
             Frequency
             <select
-              value={scheduleType}
-              onChange={(event) => setScheduleType(event.target.value as HabitItem["schedule_type"])}
+              value={frequencyType}
+              onChange={(event) => setFrequencyType(event.target.value as HabitItem["frequency_type"])}
             >
               <option value="daily">Daily</option>
               <option value="weekdays">Weekdays</option>
-              <option value="custom_days">Custom days</option>
-              <option value="times_per_week">Times per week</option>
+              <option value="weekends">Weekends</option>
             </select>
           </label>
-
-          {scheduleType === "custom_days" ? (
-            <fieldset>
-              <legend>Choose days</legend>
-              <div className="pill-grid">
-                {weekdays.map((day) => {
-                  const active = customDays.includes(day.value);
-                  return (
-                    <button
-                      key={day.value}
-                      type="button"
-                      className={active ? "pill active" : "pill"}
-                      onClick={() => {
-                        setCustomDays((current) => {
-                          if (current.includes(day.value)) {
-                            return current.filter((value) => value !== day.value);
-                          }
-
-                          return [...current, day.value];
-                        });
-                      }}
-                    >
-                      {day.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </fieldset>
-          ) : null}
-
-          {scheduleType === "times_per_week" ? (
-            <label>
-              Times per week
-              <input
-                type="number"
-                min={1}
-                max={7}
-                value={timesPerWeek}
-                onChange={(event) => setTimesPerWeek(Number(event.target.value) || 1)}
-              />
-            </label>
-          ) : null}
+          <label>
+            Target threshold
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step="0.05"
+              value={targetThreshold}
+              onChange={(event) => setTargetThreshold(Number(event.target.value) || 0.8)}
+            />
+          </label>
 
           <p className="muted">{schedulePreview}</p>
-          <button type="submit" className="primary" disabled={createMutation.isPending || !title.trim()}>
+          <button type="submit" className="primary" disabled={createMutation.isPending || !name.trim()}>
             Add habit
           </button>
         </form>
@@ -193,9 +140,11 @@ export function HabitManager({ initialHabits }: { initialHabits: HabitItem[] }) 
           {habits.map((habit) => (
             <li key={habit.id}>
               <div>
-                <strong>{habit.title}</strong>
-                {habit.notes ? <p>{habit.notes}</p> : null}
-                <small>{habit.schedule_type.replaceAll("_", " ")}</small>
+                <strong>{habit.name}</strong>
+                {habit.description ? <p>{habit.description}</p> : null}
+                <small>
+                  {frequencyLabels[habit.frequency_type]} • {Math.round(habit.target_threshold * 100)}% target
+                </small>
               </div>
               <button
                 type="button"

@@ -1,24 +1,23 @@
-import { RewardManager } from "@/components/reward-manager";
 import { getCurrentUserOrRedirect } from "@/lib/auth";
-import { listRewardContracts, listRewardUnlocks } from "@/lib/data";
 
 export default async function RewardsPage() {
-  const { user, supabase } = await getCurrentUserOrRedirect();
-  const [contracts, unlocks] = await Promise.all([
-    listRewardContracts(supabase, user.id),
-    listRewardUnlocks(supabase, user.id)
-  ]);
+  await getCurrentUserOrRedirect();
 
   return (
     <section className="page">
       <header className="page-header">
         <div>
-          <p className="eyebrow">Behavior Contracts</p>
+          <p className="eyebrow">Phase C</p>
           <h2>Rewards</h2>
-          <p>Define what is unlocked only after your daily habits are complete.</p>
+          <p>Rewards are intentionally paused in Phase B while core streak and data-model alignment is stabilized.</p>
         </div>
       </header>
-      <RewardManager initialContracts={contracts as any} initialUnlocks={unlocks as any} />
+      <section className="panel">
+        <h3>Current status</h3>
+        <p className="muted">
+          Phase B focuses on `profiles`, `habits`, and `habit_logs`. Reward contract tables are out of scope for this phase.
+        </p>
+      </section>
     </section>
   );
 }

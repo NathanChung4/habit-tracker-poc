@@ -12,7 +12,7 @@ export default async function HabitsPage() {
         <div>
           <p className="eyebrow">Habit System</p>
           <h2>Habits</h2>
-          <p>Configure recurring habits with flexible schedules.</p>
+          <p>Define daily, weekday, or weekend habits tied to your profile and streak model.</p>
         </div>
       </header>
       <HabitManager initialHabits={habits as any} />

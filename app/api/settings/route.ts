@@ -11,8 +11,8 @@ export async function GET() {
     return NextResponse.json({
       settings: {
         timezone: profile.timezone,
-        dayCutoffMinutes: profile.day_cutoff_minutes,
-        streakThreshold: profile.streak_threshold
+        cutoffTime: profile.cutoff_time,
+        protectionTokens: profile.protection_tokens
       }
     });
   } catch (error) {
@@ -30,8 +30,8 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({
       settings: {
         timezone: profile.timezone,
-        dayCutoffMinutes: profile.day_cutoff_minutes,
-        streakThreshold: profile.streak_threshold
+        cutoffTime: profile.cutoff_time,
+        protectionTokens: profile.protection_tokens
       }
     });
   } catch (error) {

@@ -4,27 +4,18 @@ import { FormEvent, useState } from "react";
 
 interface SettingsFormProps {
   timezone: string;
-  dayCutoffMinutes: number;
-  streakThreshold: number;
+  cutoffTime: string;
+  protectionTokens: number;
 }
 
-function minutesToTime(minutes: number): string {
-  const hours = Math.floor(minutes / 60)
-    .toString()
-    .padStart(2, "0");
-  const mins = (minutes % 60).toString().padStart(2, "0");
-  return `${hours}:${mins}`;
+function normalizeTimeForInput(value: string): string {
+  return value.length >= 5 ? value.slice(0, 5) : "04:00";
 }
 
-function timeToMinutes(value: string): number {
-  const [hours, minutes] = value.split(":").map(Number);
-  return hours * 60 + minutes;
-}
-
-export function SettingsForm({ timezone, dayCutoffMinutes, streakThreshold }: SettingsFormProps) {
+export function SettingsForm({ timezone, cutoffTime, protectionTokens }: SettingsFormProps) {
   const [tz, setTz] = useState(timezone);
-  const [cutoff, setCutoff] = useState(minutesToTime(dayCutoffMinutes));
-  const [threshold, setThreshold] = useState(streakThreshold);
+  const [cutoff, setCutoff] = useState(normalizeTimeForInput(cutoffTime));
+  const [tokens, setTokens] = useState(protectionTokens);
   const [status, setStatus] = useState<string | null>(null);
 
   const onSubmit = async (event: FormEvent) => {
@@ -36,8 +27,8 @@ export function SettingsForm({ timezone, dayCutoffMinutes, streakThreshold }: Se
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         timezone: tz,
-        dayCutoffMinutes: timeToMinutes(cutoff),
-        streakThreshold: threshold
+        cutoffTime: `${cutoff}:00`,
+        protectionTokens: tokens
       })
     });
 
@@ -51,6 +42,7 @@ export function SettingsForm({ timezone, dayCutoffMinutes, streakThreshold }: Se
   };
 
   const commonTimezones = [
+    "UTC",
     "America/Chicago",
     "America/New_York",
     "America/Los_Angeles",
@@ -76,19 +68,19 @@ export function SettingsForm({ timezone, dayCutoffMinutes, streakThreshold }: Se
         <input type="time" value={cutoff} onChange={(event) => setCutoff(event.target.value)} />
       </label>
       <label>
-        Streak threshold
+        Protection tokens
         <input
           type="number"
-          step="0.05"
           min={0}
-          max={1}
-          value={threshold}
-          onChange={(event) => setThreshold(Number(event.target.value))}
+          max={20}
+          value={tokens}
+          onChange={(event) => setTokens(Number(event.target.value) || 0)}
         />
       </label>
       <button type="submit" className="primary">
         Save settings
       </button>
+      <p className="muted">Streak logic is fixed at the 80% completion rule.</p>
       {status ? <p className="muted">{status}</p> : null}
     </form>
   );

@@ -12,13 +12,13 @@ export default async function SettingsPage() {
         <div>
           <p className="eyebrow">Configuration</p>
           <h2>Settings</h2>
-          <p>Control timezone, reset cutoff, and streak consistency threshold.</p>
+          <p>Control timezone, day rollover cutoff, and token protection strategy.</p>
         </div>
       </header>
       <SettingsForm
         timezone={profile.timezone}
-        dayCutoffMinutes={profile.day_cutoff_minutes}
-        streakThreshold={profile.streak_threshold}
+        cutoffTime={profile.cutoff_time}
+        protectionTokens={profile.protection_tokens}
       />
     </section>
   );

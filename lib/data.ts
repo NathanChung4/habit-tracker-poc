@@ -1,91 +1,76 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getEffectiveLocalDate, getWeekStartDate } from "@patternfinder/domain";
-import { habitSchema, profileSettingsSchema, rewardContractSchema } from "@/lib/validators";
+import { expandDatesBetween, getEffectiveLocalDate, getWeekStartDate, shiftDateLocal } from "@patternfinder/domain";
+import { habitSchema, profileSettingsSchema } from "@/lib/validators";
 
 type DbClient = SupabaseClient<any, "public", any>;
+
+const STREAK_THRESHOLD = 0.8;
+const DEFAULT_REPORT_DAYS = 14;
 
 export interface ProfileRow {
   id: string;
   timezone: string;
-  day_cutoff_minutes: number;
-  streak_threshold: number;
-  streak_count: number;
-  streak_protection_tokens: number;
-  xp: number;
-  level: number;
+  cutoff_time: string;
+  protection_tokens: number;
 }
 
 export interface HabitRow {
   id: string;
   user_id: string;
-  title: string;
-  notes: string | null;
-  schedule_type: "daily" | "weekdays" | "custom_days" | "times_per_week";
-  schedule_config: Record<string, unknown>;
-  is_active: boolean;
+  name: string;
+  description: string | null;
+  frequency_type: string;
+  target_threshold: number;
   created_at: string;
-  updated_at: string;
 }
 
-export interface TodayInstance {
+export interface TodayHabitItem {
   id: string;
-  habitId: string;
-  title: string;
-  notes: string | null;
-  dateLocal: string;
-  status: "pending" | "done" | "missed";
-  completedAt: string | null;
+  name: string;
+  description: string | null;
+  status: "pending" | "done";
 }
 
 export interface TodayDashboard {
   profile: ProfileRow;
   dateLocal: string;
-  instances: TodayInstance[];
+  habits: TodayHabitItem[];
   summary: {
     completionRate: number;
     scheduledCount: number;
     completedCount: number;
     streakCount: number;
     tokenUsed: boolean;
-    xpAwarded: number;
+    threshold: number;
   };
-  rewardUnlocks: Array<{
-    id: string;
-    contractId: string;
-    title: string;
-    status: "locked" | "unlocked" | "redeemed";
-  }>;
-  badges: Array<{
-    code: string;
-    name: string;
-  }>;
+}
+
+interface DailyConsistencyRow {
+  date_local: string;
+  completion_rate: number;
+  scheduled_count: number;
+  completed_count: number;
+  streak_count: number;
+  token_used: boolean;
 }
 
 export async function ensureProfile(client: DbClient, userId: string): Promise<ProfileRow> {
   const { data, error } = await client
     .from("profiles")
-    .select("id, timezone, day_cutoff_minutes, streak_threshold, streak_count, streak_protection_tokens, xp, level")
+    .select("id, timezone, cutoff_time, protection_tokens")
     .eq("id", userId)
     .maybeSingle();
 
-  if (error) {
-    throw error;
-  }
-
-  if (data) {
-    return data as ProfileRow;
-  }
+  if (error) throw error;
+  if (data) return data as ProfileRow;
 
   const { data: created, error: insertError } = await client
     .from("profiles")
     .insert({ id: userId })
-    .select("id, timezone, day_cutoff_minutes, streak_threshold, streak_count, streak_protection_tokens, xp, level")
+    .select("id, timezone, cutoff_time, protection_tokens")
     .single();
 
-  if (insertError) {
-    throw insertError;
-  }
-
+  if (insertError) throw insertError;
   return created as ProfileRow;
 }
 
@@ -97,292 +82,184 @@ export async function updateProfileSettings(client: DbClient, userId: string, pa
     .from("profiles")
     .update({
       timezone: parsed.timezone,
-      day_cutoff_minutes: parsed.dayCutoffMinutes,
-      streak_threshold: parsed.streakThreshold
+      cutoff_time: parsed.cutoffTime,
+      protection_tokens: parsed.protectionTokens
     })
     .eq("id", userId)
-    .select("id, timezone, day_cutoff_minutes, streak_threshold, streak_count, streak_protection_tokens, xp, level")
+    .select("id, timezone, cutoff_time, protection_tokens")
     .single();
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return data as ProfileRow;
-}
-
-export async function ensureDayInstances(client: DbClient, userId: string, dateLocal?: string): Promise<void> {
-  const { error } = await client.rpc("generate_day_instances_for_user", {
-    p_user: userId,
-    p_date: dateLocal ?? null
-  });
-
-  if (error) {
-    throw error;
-  }
-}
-
-export async function getTodayDashboard(client: DbClient, userId: string): Promise<TodayDashboard> {
-  const profile = await ensureProfile(client, userId);
-  const dateLocal = getEffectiveLocalDate(new Date(), profile.timezone, profile.day_cutoff_minutes);
-
-  await ensureDayInstances(client, userId, dateLocal);
-
-  const [{ data: rawInstances, error: instanceError }, { data: summaryData, error: summaryError }] = await Promise.all([
-    client
-      .from("habit_day_instances")
-      .select("id, habit_id, date_local, status, completed_at")
-      .eq("user_id", userId)
-      .eq("date_local", dateLocal)
-      .order("created_at", { ascending: true }),
-    client
-      .from("daily_summaries")
-      .select("completion_rate, scheduled_count, completed_count, streak_count, token_used, xp_awarded")
-      .eq("user_id", userId)
-      .eq("date_local", dateLocal)
-      .maybeSingle()
-  ]);
-
-  if (instanceError) {
-    throw instanceError;
-  }
-
-  if (summaryError) {
-    throw summaryError;
-  }
-
-  const habitIds = (rawInstances ?? []).map((item: any) => item.habit_id);
-  const { data: habits, error: habitsError } = habitIds.length
-    ? await client.from("habits").select("id, title, notes").in("id", habitIds)
-    : { data: [], error: null };
-
-  if (habitsError) {
-    throw habitsError;
-  }
-
-  const habitMap = new Map((habits ?? []).map((habit: any) => [habit.id, habit]));
-
-  const instances: TodayInstance[] = (rawInstances ?? []).map((instance: any) => ({
-    id: instance.id,
-    habitId: instance.habit_id,
-    title: habitMap.get(instance.habit_id)?.title ?? "Untitled Habit",
-    notes: habitMap.get(instance.habit_id)?.notes ?? null,
-    dateLocal: instance.date_local,
-    status: instance.status,
-    completedAt: instance.completed_at
-  }));
-
-  const [{ data: unlockRows, error: unlockError }, { data: badgeRows, error: badgeError }] = await Promise.all([
-    client
-      .from("reward_unlocks")
-      .select("id, reward_contract_id, status")
-      .eq("user_id", userId)
-      .eq("date_local", dateLocal)
-      .order("created_at", { ascending: true }),
-    client
-      .from("user_badges")
-      .select("badges(code, name)")
-      .eq("user_id", userId)
-      .order("awarded_at", { ascending: false })
-      .limit(6)
-  ]);
-
-  if (unlockError) {
-    throw unlockError;
-  }
-
-  if (badgeError) {
-    throw badgeError;
-  }
-
-  const contractIds = (unlockRows ?? []).map((row: any) => row.reward_contract_id);
-  const { data: contracts, error: contractsError } = contractIds.length
-    ? await client.from("reward_contracts").select("id, title").in("id", contractIds)
-    : { data: [], error: null };
-
-  if (contractsError) {
-    throw contractsError;
-  }
-
-  const contractMap = new Map((contracts ?? []).map((contract: any) => [contract.id, contract.title]));
-
-  return {
-    profile,
-    dateLocal,
-    instances,
-    summary: {
-      completionRate: summaryData?.completion_rate ?? 0,
-      scheduledCount: summaryData?.scheduled_count ?? instances.length,
-      completedCount:
-        summaryData?.completed_count ?? instances.filter((instance) => instance.status === "done").length,
-      streakCount: summaryData?.streak_count ?? profile.streak_count,
-      tokenUsed: summaryData?.token_used ?? false,
-      xpAwarded: summaryData?.xp_awarded ?? 0
-    },
-    rewardUnlocks: (unlockRows ?? []).map((row: any) => ({
-      id: row.id,
-      contractId: row.reward_contract_id,
-      title: contractMap.get(row.reward_contract_id) ?? "Reward",
-      status: row.status
-    })),
-    badges: (badgeRows ?? []).flatMap((row: any) => {
-      if (!row.badges) {
-        return [];
-      }
-
-      if (Array.isArray(row.badges)) {
-        return row.badges.map((badge) => ({ code: badge.code, name: badge.name }));
-      }
-
-      return [{ code: row.badges.code, name: row.badges.name }];
-    })
-  };
 }
 
 export async function listHabits(client: DbClient, userId: string): Promise<HabitRow[]> {
   const { data, error } = await client
     .from("habits")
-    .select("id, user_id, title, notes, schedule_type, schedule_config, is_active, created_at, updated_at")
+    .select("id, user_id, name, description, frequency_type, target_threshold, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: true });
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return (data ?? []) as HabitRow[];
 }
 
 export async function createHabit(client: DbClient, userId: string, payload: unknown): Promise<HabitRow> {
   const parsed = habitSchema.parse(payload);
+  await ensureProfile(client, userId);
 
   const { data, error } = await client
     .from("habits")
     .insert({
       user_id: userId,
-      title: parsed.title,
-      notes: parsed.notes ?? null,
-      schedule_type: parsed.scheduleType,
-      schedule_config: parsed.scheduleConfig,
-      is_active: true
+      name: parsed.name,
+      description: parsed.description ?? null,
+      frequency_type: parsed.frequencyType,
+      target_threshold: parsed.targetThreshold
     })
-    .select("id, user_id, title, notes, schedule_type, schedule_config, is_active, created_at, updated_at")
+    .select("id, user_id, name, description, frequency_type, target_threshold, created_at")
     .single();
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return data as HabitRow;
 }
 
 export async function updateHabit(client: DbClient, userId: string, habitId: string, payload: unknown): Promise<HabitRow> {
   const parsed = habitSchema.partial().parse(payload);
-
   const updatePayload: Record<string, unknown> = {};
 
-  if (parsed.title !== undefined) updatePayload.title = parsed.title;
-  if (parsed.notes !== undefined) updatePayload.notes = parsed.notes;
-  if (parsed.scheduleType !== undefined) updatePayload.schedule_type = parsed.scheduleType;
-  if (parsed.scheduleConfig !== undefined) updatePayload.schedule_config = parsed.scheduleConfig;
+  if (parsed.name !== undefined) updatePayload.name = parsed.name;
+  if (parsed.description !== undefined) updatePayload.description = parsed.description;
+  if (parsed.frequencyType !== undefined) updatePayload.frequency_type = parsed.frequencyType;
+  if (parsed.targetThreshold !== undefined) updatePayload.target_threshold = parsed.targetThreshold;
 
   const { data, error } = await client
     .from("habits")
     .update(updatePayload)
     .eq("id", habitId)
     .eq("user_id", userId)
-    .select("id, user_id, title, notes, schedule_type, schedule_config, is_active, created_at, updated_at")
+    .select("id, user_id, name, description, frequency_type, target_threshold, created_at")
     .single();
 
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return data as HabitRow;
 }
 
 export async function deleteHabit(client: DbClient, userId: string, habitId: string): Promise<void> {
   const { error } = await client.from("habits").delete().eq("id", habitId).eq("user_id", userId);
-
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 }
 
-export async function toggleDayInstance(client: DbClient, userId: string, instanceId: string) {
+export async function getTodayDashboard(client: DbClient, userId: string): Promise<TodayDashboard> {
   const profile = await ensureProfile(client, userId);
-  const effectiveDate = getEffectiveLocalDate(new Date(), profile.timezone, profile.day_cutoff_minutes);
+  const dateLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+  const habits = await listHabits(client, userId);
 
-  const { data: instance, error: instanceError } = await client
-    .from("habit_day_instances")
-    .select("id, date_local, status")
-    .eq("id", instanceId)
+  const scheduledHabits = habits.filter((habit) => isHabitScheduledOnDate(habit.frequency_type, dateLocal));
+  const completedHabitIds = await getCompletedHabitIdsForDate(client, userId, dateLocal, scheduledHabits.map((habit) => habit.id));
+
+  const completedCount = scheduledHabits.filter((habit) => completedHabitIds.has(habit.id)).length;
+  const scheduledCount = scheduledHabits.length;
+  const completionRate = scheduledCount > 0 ? completedCount / scheduledCount : 0;
+
+  const streakState = await computeCurrentStreak(client, userId, profile, habits, dateLocal);
+
+  return {
+    profile,
+    dateLocal,
+    habits: scheduledHabits.map((habit) => ({
+      id: habit.id,
+      name: habit.name,
+      description: habit.description,
+      status: completedHabitIds.has(habit.id) ? "done" : "pending"
+    })),
+    summary: {
+      completionRate,
+      scheduledCount,
+      completedCount,
+      streakCount: streakState.streakCount,
+      tokenUsed: streakState.tokenUsed,
+      threshold: STREAK_THRESHOLD
+    }
+  };
+}
+
+export async function toggleDayInstance(client: DbClient, userId: string, habitId: string) {
+  const profile = await ensureProfile(client, userId);
+  const dateLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+
+  const { data: habit, error: habitError } = await client
+    .from("habits")
+    .select("id, frequency_type")
+    .eq("id", habitId)
     .eq("user_id", userId)
-    .single();
+    .maybeSingle();
 
-  if (instanceError) {
-    throw instanceError;
+  if (habitError) throw habitError;
+  if (!habit) throw new Error("Habit not found.");
+
+  if (!isHabitScheduledOnDate(habit.frequency_type, dateLocal)) {
+    throw new Error("This habit is not scheduled for today.");
   }
 
-  if (instance.date_local < effectiveDate) {
-    throw new Error("This day is already closed.");
-  }
-
-  const nextStatus = instance.status === "done" ? "pending" : "done";
-
-  const { data, error } = await client
-    .from("habit_day_instances")
-    .update({
-      status: nextStatus,
-      completed_at: nextStatus === "done" ? new Date().toISOString() : null
-    })
-    .eq("id", instanceId)
+  const { data: existingLogs, error: existingError } = await client
+    .from("habit_logs")
+    .select("id")
+    .eq("habit_id", habitId)
     .eq("user_id", userId)
-    .select("id, habit_id, date_local, status, completed_at")
-    .single();
+    .eq("completed_at", dateLocal);
 
-  if (error) {
-    throw error;
+  if (existingError) throw existingError;
+
+  if ((existingLogs ?? []).length > 0) {
+    const { error: deleteError } = await client
+      .from("habit_logs")
+      .delete()
+      .eq("habit_id", habitId)
+      .eq("user_id", userId)
+      .eq("completed_at", dateLocal);
+
+    if (deleteError) throw deleteError;
+
+    return { habitId, dateLocal, status: "pending" as const };
   }
 
-  const [summaryRpc, unlockRpc, badgeRpc] = await Promise.all([
-    client.rpc("recompute_daily_summary", { p_user: userId, p_date: instance.date_local }),
-    client.rpc("refresh_reward_unlocks", { p_user: userId, p_date: instance.date_local }),
-    client.rpc("award_badges_for_day", { p_user: userId, p_date: instance.date_local })
-  ]);
+  const { error: insertError } = await client.from("habit_logs").insert({
+    habit_id: habitId,
+    user_id: userId,
+    completed_at: dateLocal,
+    value: 1.0,
+    metadata: { source: "toggle" }
+  });
 
-  if (summaryRpc.error) throw summaryRpc.error;
-  if (unlockRpc.error) throw unlockRpc.error;
-  if (badgeRpc.error) throw badgeRpc.error;
-
-  return data;
+  if (insertError) throw insertError;
+  return { habitId, dateLocal, status: "done" as const };
 }
 
 export async function getDailyReport(client: DbClient, userId: string, startDate?: string, endDate?: string) {
-  const fromDate = startDate ?? new Date(Date.now() - 13 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const toDate = endDate ?? new Date().toISOString().slice(0, 10);
+  const profile = await ensureProfile(client, userId);
+  const habits = await listHabits(client, userId);
 
-  const { data, error } = await client
-    .from("daily_summaries")
-    .select("date_local, completion_rate, scheduled_count, completed_count, streak_count, token_used, xp_awarded")
-    .eq("user_id", userId)
-    .gte("date_local", fromDate)
-    .lte("date_local", toDate)
-    .order("date_local", { ascending: true });
+  const todayLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+  const fromDate = startDate ?? shiftDateLocal(todayLocal, -(DEFAULT_REPORT_DAYS - 1));
+  const toDate = endDate ?? todayLocal;
 
-  if (error) {
-    throw error;
+  if (fromDate > toDate) {
+    return [];
   }
 
-  return data ?? [];
+  return computeDailyRows(client, userId, habits, profile.protection_tokens, fromDate, toDate, todayLocal);
 }
 
 export async function getWeeklyReport(client: DbClient, userId: string, weeks = 8) {
+  const safeWeeks = Math.max(1, Math.min(52, weeks));
+  const profile = await ensureProfile(client, userId);
+  const todayLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
   const daily = await getDailyReport(
     client,
     userId,
-    new Date(Date.now() - weeks * 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-    new Date().toISOString().slice(0, 10)
+    shiftDateLocal(todayLocal, -safeWeeks * 7),
+    todayLocal
   );
 
   const groups = new Map<
@@ -396,10 +273,8 @@ export async function getWeeklyReport(client: DbClient, userId: string, weeks = 
     }
   >();
 
-  for (const row of daily as any[]) {
-    if ((row.scheduled_count ?? 0) <= 0) {
-      continue;
-    }
+  for (const row of daily) {
+    if (row.scheduled_count <= 0) continue;
 
     const weekStartDate = getWeekStartDate(row.date_local);
     const current = groups.get(weekStartDate) ?? {
@@ -410,11 +285,10 @@ export async function getWeeklyReport(client: DbClient, userId: string, weeks = 
       completedCount: 0
     };
 
-    current.completionRateSum += Number(row.completion_rate ?? 0);
+    current.completionRateSum += row.completion_rate;
     current.dayCount += 1;
-    current.scheduledCount += Number(row.scheduled_count ?? 0);
-    current.completedCount += Number(row.completed_count ?? 0);
-
+    current.scheduledCount += row.scheduled_count;
+    current.completedCount += row.completed_count;
     groups.set(weekStartDate, current);
   }
 
@@ -428,119 +302,165 @@ export async function getWeeklyReport(client: DbClient, userId: string, weeks = 
     .sort((a, b) => a.weekStartDate.localeCompare(b.weekStartDate));
 }
 
-export async function listRewardContracts(client: DbClient, userId: string) {
-  const { data, error } = await client
-    .from("reward_contracts")
-    .select("id, title, rule_type, rule_config, is_active, created_at, updated_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true });
+async function computeCurrentStreak(
+  client: DbClient,
+  userId: string,
+  profile: ProfileRow,
+  habits: HabitRow[],
+  todayLocal: string
+): Promise<{ streakCount: number; tokenUsed: boolean }> {
+  const lookbackStart = shiftDateLocal(todayLocal, -120);
+  const dailyRows = await computeDailyRows(
+    client,
+    userId,
+    habits,
+    profile.protection_tokens,
+    lookbackStart,
+    todayLocal,
+    todayLocal
+  );
 
-  if (error) {
-    throw error;
+  if (dailyRows.length === 0) {
+    return { streakCount: 0, tokenUsed: false };
   }
 
-  return data ?? [];
+  const lastRow = dailyRows[dailyRows.length - 1];
+  return {
+    streakCount: lastRow.streak_count,
+    tokenUsed: lastRow.token_used
+  };
 }
 
-export async function listRewardUnlocks(client: DbClient, userId: string, limit = 20) {
-  const { data, error } = await client
-    .from("reward_unlocks")
-    .select("id, reward_contract_id, date_local, status, redeemed_at, created_at")
-    .eq("user_id", userId)
-    .order("date_local", { ascending: false })
-    .limit(limit);
+async function computeDailyRows(
+  client: DbClient,
+  userId: string,
+  habits: HabitRow[],
+  protectionTokens: number,
+  fromDate: string,
+  toDate: string,
+  todayLocal: string
+): Promise<DailyConsistencyRow[]> {
+  const dates = expandDatesBetween(fromDate, toDate);
+  if (dates.length === 0) return [];
 
-  if (error) {
-    throw error;
+  const habitIds = habits.map((habit) => habit.id);
+  const logsByDate = await getCompletedHabitIdsByDate(client, userId, fromDate, toDate, habitIds);
+
+  let streakCount = 0;
+  let tokensRemaining = Math.max(0, protectionTokens);
+
+  const rows: DailyConsistencyRow[] = [];
+
+  for (const dateLocal of dates) {
+    const scheduledHabits = habits.filter((habit) => isHabitScheduledOnDate(habit.frequency_type, dateLocal));
+    const scheduledCount = scheduledHabits.length;
+    const completedSet = logsByDate.get(dateLocal) ?? new Set<string>();
+    const completedCount = scheduledHabits.filter((habit) => completedSet.has(habit.id)).length;
+    const completionRate = scheduledCount > 0 ? completedCount / scheduledCount : 0;
+
+    let tokenUsed = false;
+
+    if (scheduledCount > 0) {
+      if (completionRate >= STREAK_THRESHOLD) {
+        streakCount += 1;
+      } else if (dateLocal === todayLocal) {
+        // Do not consume a token on an open day.
+      } else if (tokensRemaining > 0) {
+        tokensRemaining -= 1;
+        tokenUsed = true;
+        streakCount += 1;
+      } else {
+        streakCount = 0;
+      }
+    }
+
+    rows.push({
+      date_local: dateLocal,
+      completion_rate: completionRate,
+      scheduled_count: scheduledCount,
+      completed_count: completedCount,
+      streak_count: streakCount,
+      token_used: tokenUsed
+    });
   }
 
-  const contractIds = (data ?? []).map((item: any) => item.reward_contract_id);
-  const contracts = contractIds.length
-    ? await client.from("reward_contracts").select("id, title").in("id", contractIds)
-    : { data: [], error: null };
-
-  if (contracts.error) {
-    throw contracts.error;
-  }
-
-  const titleById = new Map((contracts.data ?? []).map((contract: any) => [contract.id, contract.title]));
-
-  return (data ?? []).map((row: any) => ({
-    ...row,
-    contract_title: titleById.get(row.reward_contract_id) ?? "Reward"
-  }));
+  return rows;
 }
 
-export async function createRewardContract(client: DbClient, userId: string, payload: unknown) {
-  const parsed = rewardContractSchema.parse(payload);
+async function getCompletedHabitIdsForDate(
+  client: DbClient,
+  userId: string,
+  dateLocal: string,
+  habitIds: string[]
+): Promise<Set<string>> {
+  if (habitIds.length === 0) return new Set();
 
   const { data, error } = await client
-    .from("reward_contracts")
-    .insert({
-      user_id: userId,
-      title: parsed.title,
-      rule_type: "completion_threshold",
-      rule_config: { threshold: parsed.threshold },
-      is_active: parsed.isActive
-    })
-    .select("id, title, rule_type, rule_config, is_active, created_at, updated_at")
-    .single();
+    .from("habit_logs")
+    .select("habit_id")
+    .eq("user_id", userId)
+    .eq("completed_at", dateLocal)
+    .in("habit_id", habitIds);
 
-  if (error) {
-    throw error;
-  }
-
-  return data;
+  if (error) throw error;
+  return new Set((data ?? []).map((row: any) => row.habit_id));
 }
 
-export async function updateRewardContract(client: DbClient, userId: string, contractId: string, payload: unknown) {
-  const parsed = rewardContractSchema.partial().parse(payload);
-
-  const updatePayload: Record<string, unknown> = {};
-
-  if (parsed.title !== undefined) {
-    updatePayload.title = parsed.title;
-  }
-
-  if (parsed.threshold !== undefined) {
-    updatePayload.rule_config = { threshold: parsed.threshold };
-  }
-
-  if (parsed.isActive !== undefined) {
-    updatePayload.is_active = parsed.isActive;
-  }
+async function getCompletedHabitIdsByDate(
+  client: DbClient,
+  userId: string,
+  fromDate: string,
+  toDate: string,
+  habitIds: string[]
+): Promise<Map<string, Set<string>>> {
+  const map = new Map<string, Set<string>>();
+  if (habitIds.length === 0) return map;
 
   const { data, error } = await client
-    .from("reward_contracts")
-    .update(updatePayload)
-    .eq("id", contractId)
+    .from("habit_logs")
+    .select("habit_id, completed_at, value")
     .eq("user_id", userId)
-    .select("id, title, rule_type, rule_config, is_active, created_at, updated_at")
-    .single();
+    .gte("completed_at", fromDate)
+    .lte("completed_at", toDate)
+    .in("habit_id", habitIds);
 
-  if (error) {
-    throw error;
+  if (error) throw error;
+
+  for (const row of data ?? []) {
+    if (Number(row.value ?? 0) <= 0) continue;
+
+    const dateLocal = String(row.completed_at);
+    const current = map.get(dateLocal) ?? new Set<string>();
+    current.add(String(row.habit_id));
+    map.set(dateLocal, current);
   }
 
-  return data;
+  return map;
 }
 
-export async function redeemRewardUnlock(client: DbClient, userId: string, unlockId: string) {
-  const { data, error } = await client
-    .from("reward_unlocks")
-    .update({
-      status: "redeemed",
-      redeemed_at: new Date().toISOString()
-    })
-    .eq("id", unlockId)
-    .eq("user_id", userId)
-    .eq("status", "unlocked")
-    .select("id, status, redeemed_at")
-    .single();
+function isHabitScheduledOnDate(frequencyType: string, dateLocal: string): boolean {
+  const day = new Date(`${dateLocal}T00:00:00Z`).getUTCDay();
 
-  if (error) {
-    throw error;
+  switch (frequencyType) {
+    case "daily":
+      return true;
+    case "weekdays":
+      return day >= 1 && day <= 5;
+    case "weekends":
+      return day === 0 || day === 6;
+    default:
+      return true;
+  }
+}
+
+function cutoffTimeToMinutes(cutoffTime: string): number {
+  const [hourRaw, minuteRaw] = cutoffTime.split(":");
+  const hours = Number(hourRaw);
+  const minutes = Number(minuteRaw);
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return 0;
   }
 
-  return data;
+  return Math.max(0, Math.min(1439, hours * 60 + minutes));
 }

@@ -5,22 +5,22 @@ import { useRouter } from "next/navigation";
 
 interface TodayItem {
   id: string;
-  title: string;
-  notes: string | null;
-  status: "pending" | "done" | "missed";
+  name: string;
+  description: string | null;
+  status: "pending" | "done";
 }
 
 interface TodayChecklistProps {
   initialItems: TodayItem[];
 }
 
-const queryKey = ["today-instances"];
+const queryKey = ["today-habits"];
 
 export function TodayChecklist({ initialItems }: TodayChecklistProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
 
-  const { data: items } = useQuery({
+  const { data: items = [] } = useQuery({
     queryKey,
     queryFn: async () => initialItems,
     initialData: initialItems
@@ -79,21 +79,20 @@ export function TodayChecklist({ initialItems }: TodayChecklistProps) {
           <li key={item.id}>
             <button
               type="button"
-              disabled={item.status === "missed" || toggleMutation.isPending}
+              disabled={toggleMutation.isPending}
               onClick={() => toggleMutation.mutate(item.id)}
               className={`check-item status-${item.status}`}
             >
               <span className="dot" aria-hidden />
               <span className="content">
-                <strong>{item.title}</strong>
-                {item.notes ? <small>{item.notes}</small> : null}
+                <strong>{item.name}</strong>
+                {item.description ? <small>{item.description}</small> : null}
               </span>
-              <span className="status-label">
-                {item.status === "done" ? "Done" : item.status === "missed" ? "Missed" : "Pending"}
-              </span>
+              <span className="status-label">{item.status === "done" ? "Done" : "Pending"}</span>
             </button>
           </li>
         ))}
+        {items.length === 0 ? <li className="empty">No habits scheduled for today.</li> : null}
       </ul>
     </section>
   );

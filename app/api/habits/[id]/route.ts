@@ -3,9 +3,9 @@ import { deleteHabit, updateHabit } from "@/lib/data";
 import { requireApiUser } from "@/lib/api-auth";
 
 interface Params {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export async function PATCH(request: NextRequest, { params }: Params) {
@@ -13,7 +13,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if ("error" in auth) return auth.error;
 
   try {
-    const { id } = params;
+    const { id } = await params;
     const payload = await request.json();
     const habit = await updateHabit(auth.supabase, auth.user.id, id, payload);
     return NextResponse.json({ habit });
@@ -27,7 +27,7 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   if ("error" in auth) return auth.error;
 
   try {
-    const { id } = params;
+    const { id } = await params;
     await deleteHabit(auth.supabase, auth.user.id, id);
     return NextResponse.json({ success: true });
   } catch (error) {

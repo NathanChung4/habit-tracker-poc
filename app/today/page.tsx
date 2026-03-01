@@ -9,7 +9,7 @@ export default async function TodayPage() {
   const dashboard = await getTodayDashboard(supabase, user.id);
 
   const completionPercent = Math.round(dashboard.summary.completionRate * 100);
-  const pendingCount = dashboard.instances.filter((instance) => instance.status === "pending").length;
+  const pendingCount = dashboard.habits.filter((habit) => habit.status === "pending").length;
 
   return (
     <section className="page">
@@ -17,33 +17,37 @@ export default async function TodayPage() {
         <div>
           <p className="eyebrow">{dashboard.dateLocal}</p>
           <h2>Today</h2>
-          <p>Consistency compounds when you finish what you planned.</p>
+          <p>Binary consistency loop: complete scheduled habits for the current local day.</p>
         </div>
         <ProgressRing value={dashboard.summary.completionRate} label="Completion" />
       </header>
 
       <div className="stats-grid">
-        <StatCard label="Daily completion" value={`${completionPercent}%`} hint="Target 100% for reward unlocks" />
         <StatCard
-          label="Streak"
+          label="Daily completion"
+          value={`${completionPercent}%`}
+          hint={`Streak threshold is fixed at ${Math.round(dashboard.summary.threshold * 100)}%`}
+        />
+        <StatCard
+          label="Current streak"
           value={`${dashboard.summary.streakCount} days`}
-          hint={dashboard.summary.tokenUsed ? "A protection token was used" : "No token used today"}
+          hint={dashboard.summary.tokenUsed ? "A protection token was used in the streak window" : "No token consumed today"}
           accent="orange"
         />
         <StatCard
-          label="XP / Level"
-          value={`${dashboard.profile.xp} XP • L${dashboard.profile.level}`}
-          hint={`Today +${dashboard.summary.xpAwarded} XP`}
+          label="Protection tokens"
+          value={`${dashboard.profile.protection_tokens}`}
+          hint="A token can preserve streak on a missed threshold day"
           accent="blue"
         />
       </div>
 
       <TodayChecklist
-        initialItems={dashboard.instances.map((instance) => ({
-          id: instance.id,
-          title: instance.title,
-          notes: instance.notes,
-          status: instance.status
+        initialItems={dashboard.habits.map((habit) => ({
+          id: habit.id,
+          name: habit.name,
+          description: habit.description,
+          status: habit.status
         }))}
       />
 
@@ -51,27 +55,11 @@ export default async function TodayPage() {
         <section className="panel">
           <h2>In-App Reminder</h2>
           <p className="muted">
-            You still have {pendingCount} pending habit{pendingCount === 1 ? "" : "s"} today. Completing them keeps
-            your consistency score and reward unlocks on track.
+            You still have {pendingCount} pending habit{pendingCount === 1 ? "" : "s"}. Hitting at least 80%
+            completion keeps the streak alive.
           </p>
         </section>
       ) : null}
-
-      <section className="panel">
-        <h2>Reward Status</h2>
-        <ul className="unlock-list">
-          {dashboard.rewardUnlocks.map((unlock) => (
-            <li key={unlock.id}>
-              <div>
-                <strong>{unlock.title}</strong>
-                <small>{unlock.status === "locked" ? "Locked until completion goal" : "Unlocked for today"}</small>
-              </div>
-              <span className={`tag status-${unlock.status}`}>{unlock.status}</span>
-            </li>
-          ))}
-          {dashboard.rewardUnlocks.length === 0 ? <li className="empty">Create a reward contract to start gating rewards.</li> : null}
-        </ul>
-      </section>
     </section>
   );
 }

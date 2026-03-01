@@ -3,9 +3,9 @@ import { toggleDayInstance } from "@/lib/data";
 import { requireApiUser } from "@/lib/api-auth";
 
 interface Params {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 }
 
 export async function POST(_request: NextRequest, { params }: Params) {
@@ -13,7 +13,7 @@ export async function POST(_request: NextRequest, { params }: Params) {
   if ("error" in auth) return auth.error;
 
   try {
-    const { id } = params;
+    const { id } = await params;
     const dayInstance = await toggleDayInstance(auth.supabase, auth.user.id, id);
     return NextResponse.json({ dayInstance });
   } catch (error) {
