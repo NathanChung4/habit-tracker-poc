@@ -24,6 +24,16 @@ export interface HabitRow {
   created_at: string;
 }
 
+export interface RewardContractRow {
+  id: string;
+  user_id: string;
+  title: string;
+  rule_type: string;
+  threshold: number;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface TodayHabitItem {
   id: string;
   name: string;
@@ -300,6 +310,49 @@ export async function getWeeklyReport(client: DbClient, userId: string, weeks = 
       completedCount: group.completedCount
     }))
     .sort((a, b) => a.weekStartDate.localeCompare(b.weekStartDate));
+}
+
+export async function listRewardContracts(client: DbClient, userId: string): Promise<RewardContractRow[]> {
+  const { data, error } = await client
+    .from("reward_contracts")
+    .select("id, user_id, title, rule_type, threshold, is_active, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (!error) {
+    return (data ?? []).map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id,
+      title: row.title,
+      rule_type: row.rule_type ?? "completion_threshold",
+      threshold: Number(row.threshold ?? 1),
+      is_active: Boolean(row.is_active),
+      created_at: row.created_at
+    }));
+  }
+
+  // Compatibility path for older reward_contracts schema where threshold is embedded in rule_config.
+  if (String((error as any).code ?? "") === "42703") {
+    const legacy = await client
+      .from("reward_contracts")
+      .select("id, user_id, title, rule_type, rule_config, is_active, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+
+    if (legacy.error) throw legacy.error;
+
+    return (legacy.data ?? []).map((row: any) => ({
+      id: row.id,
+      user_id: row.user_id,
+      title: row.title,
+      rule_type: row.rule_type ?? "completion_threshold",
+      threshold: Number(row.rule_config?.threshold ?? 1),
+      is_active: Boolean(row.is_active),
+      created_at: row.created_at
+    }));
+  }
+
+  throw error;
 }
 
 async function computeCurrentStreak(

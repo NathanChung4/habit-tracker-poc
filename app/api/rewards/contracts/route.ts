@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
+import { listRewardContracts } from "@/lib/data";
 
 export async function GET() {
   const auth = await requireApiUser();
   if ("error" in auth) return auth.error;
 
-  return NextResponse.json(
-    { error: "Rewards API is disabled in Phase B. It will return in Phase C." },
-    { status: 410 }
-  );
+  try {
+    const contracts = await listRewardContracts(auth.supabase, auth.user.id);
+    return NextResponse.json({ contracts });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
 }
 
 export async function POST() {
@@ -16,7 +19,7 @@ export async function POST() {
   if ("error" in auth) return auth.error;
 
   return NextResponse.json(
-    { error: "Rewards API is disabled in Phase B. It will return in Phase C." },
-    { status: 410 }
+    { error: "POST rewards/contracts is not enabled yet. This Phase C step is read-only." },
+    { status: 405 }
   );
 }
