@@ -88,6 +88,60 @@ interface DailyConsistencyRow {
   token_used: boolean;
 }
 
+interface DailyCountRowInput {
+  date_local: string;
+  scheduled_count: number;
+  completed_count: number;
+}
+
+export function getEffectiveDateForProfile(
+  now: Date,
+  profile: Pick<ProfileRow, "timezone" | "cutoff_time">
+): string {
+  return getEffectiveLocalDate(now, profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+}
+
+export function applyStreakAndTokenPolicy(
+  rows: DailyCountRowInput[],
+  options: {
+    protectionTokens: number;
+    todayLocal: string;
+    threshold?: number;
+  }
+): DailyConsistencyRow[] {
+  let streakCount = 0;
+  let tokensRemaining = Math.max(0, options.protectionTokens);
+  const threshold = options.threshold ?? STREAK_THRESHOLD;
+
+  return rows.map((row) => {
+    const completionRate = row.scheduled_count > 0 ? row.completed_count / row.scheduled_count : 0;
+    let tokenUsed = false;
+
+    if (row.scheduled_count > 0) {
+      if (completionRate >= threshold) {
+        streakCount += 1;
+      } else if (row.date_local === options.todayLocal) {
+        // Do not consume a token on an open day.
+      } else if (tokensRemaining > 0) {
+        tokensRemaining -= 1;
+        tokenUsed = true;
+        streakCount += 1;
+      } else {
+        streakCount = 0;
+      }
+    }
+
+    return {
+      date_local: row.date_local,
+      completion_rate: completionRate,
+      scheduled_count: row.scheduled_count,
+      completed_count: row.completed_count,
+      streak_count: streakCount,
+      token_used: tokenUsed
+    };
+  });
+}
+
 export async function ensureProfile(client: DbClient, userId: string): Promise<ProfileRow> {
   const { data, error } = await client
     .from("profiles")
@@ -186,7 +240,7 @@ export async function deleteHabit(client: DbClient, userId: string, habitId: str
 
 export async function getTodayDashboard(client: DbClient, userId: string): Promise<TodayDashboard> {
   const profile = await ensureProfile(client, userId);
-  const dateLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+  const dateLocal = getEffectiveDateForProfile(new Date(), profile);
   const habits = await listHabits(client, userId);
   const completion = await computeCompletionForDate(client, userId, habits, dateLocal);
   const activeRewardContracts = (await listRewardContracts(client, userId)).filter((contract) => contract.is_active);
@@ -224,7 +278,7 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
 
 export async function toggleDayInstance(client: DbClient, userId: string, habitId: string) {
   const profile = await ensureProfile(client, userId);
-  const dateLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+  const dateLocal = getEffectiveDateForProfile(new Date(), profile);
 
   const { data: habit, error: habitError } = await client
     .from("habits")
@@ -286,7 +340,7 @@ export async function getDailyReport(client: DbClient, userId: string, startDate
   const profile = await ensureProfile(client, userId);
   const habits = await listHabits(client, userId);
 
-  const todayLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+  const todayLocal = getEffectiveDateForProfile(new Date(), profile);
   const fromDate = startDate ?? shiftDateLocal(todayLocal, -(DEFAULT_REPORT_DAYS - 1));
   const toDate = endDate ?? todayLocal;
 
@@ -300,7 +354,7 @@ export async function getDailyReport(client: DbClient, userId: string, startDate
 export async function getWeeklyReport(client: DbClient, userId: string, weeks = 8) {
   const safeWeeks = Math.max(1, Math.min(52, weeks));
   const profile = await ensureProfile(client, userId);
-  const todayLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
+  const todayLocal = getEffectiveDateForProfile(new Date(), profile);
   const daily = await getDailyReport(
     client,
     userId,
@@ -787,46 +841,21 @@ async function computeDailyRows(
 
   const habitIds = habits.map((habit) => habit.id);
   const logsByDate = await getCompletedHabitIdsByDate(client, userId, fromDate, toDate, habitIds);
-
-  let streakCount = 0;
-  let tokensRemaining = Math.max(0, protectionTokens);
-
-  const rows: DailyConsistencyRow[] = [];
+  const countRows: DailyCountRowInput[] = [];
 
   for (const dateLocal of dates) {
     const scheduledHabits = habits.filter((habit) => isHabitScheduledOnDate(habit.frequency_type, dateLocal));
     const scheduledCount = scheduledHabits.length;
     const completedSet = logsByDate.get(dateLocal) ?? new Set<string>();
     const completedCount = scheduledHabits.filter((habit) => completedSet.has(habit.id)).length;
-    const completionRate = scheduledCount > 0 ? completedCount / scheduledCount : 0;
-
-    let tokenUsed = false;
-
-    if (scheduledCount > 0) {
-      if (completionRate >= STREAK_THRESHOLD) {
-        streakCount += 1;
-      } else if (dateLocal === todayLocal) {
-        // Do not consume a token on an open day.
-      } else if (tokensRemaining > 0) {
-        tokensRemaining -= 1;
-        tokenUsed = true;
-        streakCount += 1;
-      } else {
-        streakCount = 0;
-      }
-    }
-
-    rows.push({
+    countRows.push({
       date_local: dateLocal,
-      completion_rate: completionRate,
       scheduled_count: scheduledCount,
-      completed_count: completedCount,
-      streak_count: streakCount,
-      token_used: tokenUsed
+      completed_count: completedCount
     });
   }
 
-  return rows;
+  return applyStreakAndTokenPolicy(countRows, { protectionTokens, todayLocal, threshold: STREAK_THRESHOLD });
 }
 
 async function getCompletedHabitIdsForDate(
