@@ -70,6 +70,22 @@ export default async function TodayPage() {
           status: unlock.status
         }))}
       />
+
+      <section className="panel">
+        <h2>Recent Redemptions</h2>
+        <ul className="unlock-list">
+          {dashboard.rewardHistory.map((entry) => (
+            <li key={entry.id}>
+              <div>
+                <strong>{entry.title}</strong>
+                <small>Redeemed for {entry.date_local}</small>
+              </div>
+              <span className="tag status-redeemed">redeemed</span>
+            </li>
+          ))}
+          {dashboard.rewardHistory.length === 0 ? <li className="empty">No redemptions yet.</li> : null}
+        </ul>
+      </section>
     </section>
   );
 }

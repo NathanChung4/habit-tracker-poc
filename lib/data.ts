@@ -42,6 +42,14 @@ export interface RewardUnlockRow {
   status: "locked" | "unlocked" | "redeemed";
 }
 
+export interface RewardHistoryRow {
+  id: string;
+  reward_contract_id: string;
+  title: string;
+  date_local: string;
+  redeemed_at: string | null;
+}
+
 export interface TodayHabitItem {
   id: string;
   name: string;
@@ -54,6 +62,7 @@ export interface TodayDashboard {
   dateLocal: string;
   habits: TodayHabitItem[];
   rewardUnlocks: RewardUnlockRow[];
+  rewardHistory: RewardHistoryRow[];
   summary: {
     completionRate: number;
     scheduledCount: number;
@@ -176,7 +185,10 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
   const completion = await computeCompletionForDate(client, userId, habits, dateLocal);
   const activeRewardContracts = (await listRewardContracts(client, userId)).filter((contract) => contract.is_active);
   await refreshRewardUnlocksForDate(client, userId, dateLocal, completion.completionRate, activeRewardContracts);
-  const rewardUnlocks = await listRewardUnlocksForDate(client, userId, dateLocal, activeRewardContracts);
+  const [rewardUnlocks, rewardHistory] = await Promise.all([
+    listRewardUnlocksForDate(client, userId, dateLocal, activeRewardContracts),
+    listRecentRewardHistory(client, userId, 7)
+  ]);
 
   const streakState = await computeCurrentStreak(client, userId, profile, habits, dateLocal);
 
@@ -190,6 +202,7 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
       status: completion.completedHabitIds.has(habit.id) ? "done" : "pending"
     })),
     rewardUnlocks,
+    rewardHistory,
     summary: {
       completionRate: completion.completionRate,
       scheduledCount: completion.scheduledCount,
@@ -590,6 +603,47 @@ async function listRewardUnlocksForDate(
       status: normalizedStatus
     };
   });
+}
+
+async function listRecentRewardHistory(client: DbClient, userId: string, limit: number): Promise<RewardHistoryRow[]> {
+  const safeLimit = Math.max(1, Math.min(limit, 30));
+
+  const rows = await client
+    .from("reward_unlocks")
+    .select("id, reward_contract_id, date_local, redeemed_at")
+    .eq("user_id", userId)
+    .eq("status", "redeemed")
+    .order("redeemed_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (rows.error) {
+    if (String((rows.error as any).code ?? "") === "42P01") {
+      return [];
+    }
+    throw rows.error;
+  }
+
+  const contractIds = [...new Set((rows.data ?? []).map((row: any) => String(row.reward_contract_id)))];
+  const contracts =
+    contractIds.length > 0
+      ? await client.from("reward_contracts").select("id, title").in("id", contractIds)
+      : { data: [], error: null };
+
+  if (contracts.error) {
+    throw contracts.error;
+  }
+
+  const titleByContractId = new Map<string, string>(
+    (contracts.data ?? []).map((contract: any) => [String(contract.id), String(contract.title)])
+  );
+
+  return (rows.data ?? []).map((row: any) => ({
+    id: String(row.id),
+    reward_contract_id: String(row.reward_contract_id),
+    title: titleByContractId.get(String(row.reward_contract_id)) ?? "Reward",
+    date_local: String(row.date_local),
+    redeemed_at: row.redeemed_at ? String(row.redeemed_at) : null
+  }));
 }
 
 async function computeCurrentStreak(
