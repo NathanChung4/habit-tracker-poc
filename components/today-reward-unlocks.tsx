@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 
@@ -14,6 +15,7 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
   const queryClient = useQueryClient();
   const router = useRouter();
   const queryKey = ["today-reward-unlocks"];
+  const [redeemError, setRedeemError] = useState<string | null>(null);
 
   const { data: unlocks = [] } = useQuery({
     queryKey,
@@ -45,6 +47,10 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
             : unlock
         )
       );
+      setRedeemError(null);
+    },
+    onError: (error) => {
+      setRedeemError(error instanceof Error ? error.message : "Failed to redeem reward");
     },
     onSettled: () => {
       router.refresh();
@@ -65,7 +71,10 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
               <button
                 type="button"
                 className="primary"
-                onClick={() => redeemMutation.mutate(unlock.id)}
+                onClick={() => {
+                  setRedeemError(null);
+                  redeemMutation.mutate(unlock.id);
+                }}
                 disabled={redeemMutation.isPending}
               >
                 Redeem
@@ -77,6 +86,11 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
         ))}
         {unlocks.length === 0 ? <li className="empty">No active reward contracts yet.</li> : null}
       </ul>
+      {redeemError ? (
+        <p className="error-text" role="alert">
+          {redeemError}
+        </p>
+      ) : null}
     </section>
   );
 }

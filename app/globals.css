@@ -500,6 +500,12 @@ button.pill.active {
   font-size: 0.9rem;
 }
 
+.error-text {
+  margin: 0.2rem 0 0;
+  color: var(--danger);
+  font-size: 0.88rem;
+}
+
 .empty {
   color: var(--muted);
   text-align: center;

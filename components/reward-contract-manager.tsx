@@ -35,6 +35,9 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editThreshold, setEditThreshold] = useState(1);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -60,6 +63,10 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
       setTitle("");
       setThreshold(1);
       setIsActive(true);
+      setCreateError(null);
+    },
+    onError: (error) => {
+      setCreateError(error instanceof Error ? error.message : "Could not create reward contract");
     }
   });
 
@@ -85,6 +92,16 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
       if (editingId === result.contract.id) {
         setEditingId(null);
       }
+      setEditError(null);
+      setActionError(null);
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "Could not update reward contract";
+      if (editingId) {
+        setEditError(message);
+      } else {
+        setActionError(message);
+      }
     }
   });
 
@@ -105,23 +122,31 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
       queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) =>
         current.filter((contract) => contract.id !== id)
       );
+      setActionError(null);
+    },
+    onError: (error) => {
+      setActionError(error instanceof Error ? error.message : "Could not delete reward contract");
     }
   });
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
-    await createMutation.mutateAsync();
+    setCreateError(null);
+    createMutation.mutate();
   };
 
   const startEditing = (contract: RewardContractItem) => {
     setEditingId(contract.id);
     setEditTitle(contract.title);
     setEditThreshold(contract.threshold);
+    setEditError(null);
+    setActionError(null);
   };
 
   const cancelEditing = () => {
     setEditingId(null);
+    setEditError(null);
   };
 
   const onEditSubmit = async (event: FormEvent, contract: RewardContractItem) => {
@@ -141,7 +166,8 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
       return;
     }
 
-    await patchMutation.mutateAsync({ id: contract.id, payload });
+    setEditError(null);
+    patchMutation.mutate({ id: contract.id, payload });
   };
 
   return (
@@ -181,11 +207,21 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
             Create contract
           </button>
           <p className="muted">Example: `1.0` means reward unlocks only on a perfect day.</p>
+          {createError ? (
+            <p className="error-text" role="alert">
+              {createError}
+            </p>
+          ) : null}
         </form>
       </section>
 
       <section className="panel">
         <h3>Reward Contracts</h3>
+        {actionError ? (
+          <p className="error-text" role="alert">
+            {actionError}
+          </p>
+        ) : null}
         <ul className="contract-list">
           {contracts.map((contract) => (
             <li key={contract.id}>
@@ -224,6 +260,11 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
                       Cancel
                     </button>
                   </div>
+                  {editError ? (
+                    <p className="error-text" role="alert">
+                      {editError}
+                    </p>
+                  ) : null}
                 </form>
               ) : (
                 <>
