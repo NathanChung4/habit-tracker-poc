@@ -304,7 +304,7 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
       }
     });
   }
-  const recentEvents = await listRecentConsistencyEvents(client, userId, 10);
+  const recentEvents = await listRecentConsistencyEvents(client, userId, { limit: 10 });
 
   return {
     profile,
@@ -887,14 +887,49 @@ async function getWeeklyRedeemedCount(client: DbClient, userId: string, todayLoc
   return Number(countQuery.count ?? 0);
 }
 
-async function listRecentConsistencyEvents(client: DbClient, userId: string, limit: number): Promise<ConsistencyEventFeedItem[]> {
-  const safeLimit = Math.max(1, Math.min(limit, 20));
-  const result = await client
+export async function getConsistencyEvents(
+  client: DbClient,
+  userId: string,
+  options: {
+    limit?: number;
+    type?: ConsistencyEventType;
+    from?: string;
+    to?: string;
+  } = {}
+): Promise<ConsistencyEventFeedItem[]> {
+  return listRecentConsistencyEvents(client, userId, options);
+}
+
+async function listRecentConsistencyEvents(
+  client: DbClient,
+  userId: string,
+  options: {
+    limit?: number;
+    type?: ConsistencyEventType;
+    from?: string;
+    to?: string;
+  }
+): Promise<ConsistencyEventFeedItem[]> {
+  const safeLimit = Math.max(1, Math.min(options.limit ?? 20, 50));
+  let query = client
     .from("consistency_events")
     .select("id, event_type, date_local, payload, created_at")
     .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(safeLimit);
+    .order("created_at", { ascending: false });
+
+  if (options.type) {
+    query = query.eq("event_type", options.type);
+  }
+
+  if (options.from) {
+    query = query.gte("date_local", options.from);
+  }
+
+  if (options.to) {
+    query = query.lte("date_local", options.to);
+  }
+
+  const result = await query.limit(safeLimit);
 
   if (result.error) {
     if (String((result.error as any).code ?? "") === "42P01") {

@@ -29,3 +29,16 @@ export const rewardContractPatchSchema = rewardContractCreateSchema
   .refine((payload) => Object.keys(payload).length > 0, {
     message: "At least one field must be provided."
   });
+
+const dateLocalRegex = /^\d{4}-\d{2}-\d{2}$/;
+
+export const consistencyEventsQuerySchema = z
+  .object({
+    limit: z.number().int().min(1).max(50).default(20),
+    type: z.enum(["streak_evaluated", "token_consumed", "reward_unlocked", "reward_redeemed"]).optional(),
+    from: z.string().regex(dateLocalRegex, "from must be YYYY-MM-DD").optional(),
+    to: z.string().regex(dateLocalRegex, "to must be YYYY-MM-DD").optional()
+  })
+  .refine((value) => !value.from || !value.to || value.from <= value.to, {
+    message: "from must be less than or equal to to"
+  });
