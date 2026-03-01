@@ -32,7 +32,7 @@ export default async function TodayPage() {
         <StatCard
           label="Current streak"
           value={`${dashboard.summary.streakCount} days`}
-          hint={dashboard.summary.tokenUsed ? "A protection token was used in the streak window" : "No token consumed today"}
+          hint={dashboard.summary.streakExplanation}
           accent="orange"
         />
         <StatCard
@@ -73,9 +73,27 @@ export default async function TodayPage() {
           id: unlock.id,
           title: unlock.title,
           threshold: unlock.threshold,
-          status: unlock.status
+          status: unlock.status,
+          explanation: unlock.explanation
         }))}
       />
+
+      <section className="panel">
+        <h2>Why This Status?</h2>
+        <ul className="explanation-list">
+          <li>
+            <strong>Streak</strong>
+            <p>{dashboard.summary.streakExplanation}</p>
+          </li>
+          {dashboard.rewardUnlocks.map((unlock) => (
+            <li key={`explain-${unlock.id}`}>
+              <strong>{unlock.title}</strong>
+              <p>{unlock.explanation}</p>
+            </li>
+          ))}
+          {dashboard.rewardUnlocks.length === 0 ? <li className="empty">No reward status decisions yet.</li> : null}
+        </ul>
+      </section>
 
       <section className="panel">
         <h2>Recent Redemptions</h2>

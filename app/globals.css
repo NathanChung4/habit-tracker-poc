@@ -385,6 +385,7 @@ button.pill.active {
 .habit-list,
 .contract-list,
 .unlock-list,
+.explanation-list,
 .daily-report-list,
 .weekly-report-grid {
   list-style: none;
@@ -397,6 +398,7 @@ button.pill.active {
 .habit-list li,
 .unlock-list li,
 .contract-list li,
+.explanation-list li,
 .daily-report-list li,
 .weekly-report-grid li {
   border: 1px solid var(--border);
@@ -426,6 +428,7 @@ button.pill.active {
 .weekly-report-grid p,
 .weekly-report-grid small,
 .unlock-list small,
+.explanation-list p,
 .contract-list small {
   margin: 0.25rem 0 0;
   color: var(--muted);

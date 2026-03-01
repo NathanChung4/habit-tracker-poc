@@ -45,6 +45,7 @@ export interface RewardUnlockRow {
   title: string;
   threshold: number;
   status: "locked" | "unlocked" | "redeemed";
+  explanation: string;
 }
 
 export interface RewardHistoryRow {
@@ -74,6 +75,7 @@ export interface TodayDashboard {
     completedCount: number;
     streakCount: number;
     tokenUsed: boolean;
+    streakExplanation: string;
     threshold: number;
     weeklyRedeemedCount: number;
   };
@@ -246,12 +248,19 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
   const activeRewardContracts = (await listRewardContracts(client, userId)).filter((contract) => contract.is_active);
   await refreshRewardUnlocksForDate(client, userId, dateLocal, completion.completionRate, activeRewardContracts);
   const [rewardUnlocks, rewardHistory] = await Promise.all([
-    listRewardUnlocksForDate(client, userId, dateLocal, activeRewardContracts),
+    listRewardUnlocksForDate(client, userId, dateLocal, activeRewardContracts, completion.completionRate),
     listRecentRewardHistory(client, userId, 7)
   ]);
   const weeklyRedeemedCount = await getWeeklyRedeemedCount(client, userId, dateLocal);
 
   const streakState = await computeCurrentStreak(client, userId, profile, habits, dateLocal);
+  const streakExplanation = buildStreakExplanation({
+    completionRate: completion.completionRate,
+    scheduledCount: completion.scheduledCount,
+    threshold: STREAK_THRESHOLD,
+    tokenUsed: streakState.tokenUsed,
+    protectionTokens: profile.protection_tokens
+  });
 
   return {
     profile,
@@ -270,6 +279,7 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
       completedCount: completion.completedCount,
       streakCount: streakState.streakCount,
       tokenUsed: streakState.tokenUsed,
+      streakExplanation,
       threshold: STREAK_THRESHOLD,
       weeklyRedeemedCount
     }
@@ -690,7 +700,8 @@ async function listRewardUnlocksForDate(
   client: DbClient,
   userId: string,
   dateLocal: string,
-  activeContracts: RewardContractRow[]
+  activeContracts: RewardContractRow[],
+  completionRate: number
 ): Promise<RewardUnlockRow[]> {
   if (activeContracts.length === 0) {
     return [];
@@ -711,7 +722,8 @@ async function listRewardUnlocksForDate(
         reward_contract_id: contract.id,
         title: contract.title,
         threshold: contract.threshold,
-        status: "locked"
+        status: "locked",
+        explanation: buildRewardStatusExplanation("locked", completionRate, contract.threshold)
       }));
     }
 
@@ -731,7 +743,8 @@ async function listRewardUnlocksForDate(
       reward_contract_id: contract.id,
       title: contract.title,
       threshold: contract.threshold,
-      status: normalizedStatus
+      status: normalizedStatus,
+      explanation: buildRewardStatusExplanation(normalizedStatus, completionRate, contract.threshold)
     };
   });
 }
@@ -934,4 +947,52 @@ function cutoffTimeToMinutes(cutoffTime: string): number {
   }
 
   return Math.max(0, Math.min(1439, hours * 60 + minutes));
+}
+
+function buildRewardStatusExplanation(
+  status: "locked" | "unlocked" | "redeemed",
+  completionRate: number,
+  threshold: number
+): string {
+  const completionPercent = Math.round(completionRate * 100);
+  const thresholdPercent = Math.round(threshold * 100);
+
+  if (status === "redeemed") {
+    return `Redeemed after today reached ${completionPercent}% (threshold ${thresholdPercent}%).`;
+  }
+
+  if (status === "unlocked") {
+    return `Unlocked because today is ${completionPercent}% and meets the ${thresholdPercent}% threshold.`;
+  }
+
+  return `Locked because today is ${completionPercent}%, below the ${thresholdPercent}% threshold.`;
+}
+
+function buildStreakExplanation(input: {
+  completionRate: number;
+  scheduledCount: number;
+  threshold: number;
+  tokenUsed: boolean;
+  protectionTokens: number;
+}): string {
+  if (input.scheduledCount === 0) {
+    return "No habits were scheduled today, so the streak is unchanged.";
+  }
+
+  const completionPercent = Math.round(input.completionRate * 100);
+  const thresholdPercent = Math.round(input.threshold * 100);
+
+  if (input.completionRate >= input.threshold) {
+    return `Streak advances because today hit ${completionPercent}%, meeting the ${thresholdPercent}% rule.`;
+  }
+
+  if (input.tokenUsed) {
+    return "A protection token was consumed to preserve this streak.";
+  }
+
+  if (input.protectionTokens > 0) {
+    return `Today is ${completionPercent}%, below ${thresholdPercent}%. A protection token can preserve the streak at rollover.`;
+  }
+
+  return `Today is ${completionPercent}%, below ${thresholdPercent}%, and no protection tokens remain.`;
 }

@@ -9,6 +9,7 @@ interface TodayRewardUnlock {
   title: string;
   threshold: number;
   status: "locked" | "unlocked" | "redeemed";
+  explanation: string;
 }
 
 export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRewardUnlock[] }) {
@@ -66,6 +67,7 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
             <div>
               <strong>{unlock.title}</strong>
               <small>Needs {Math.round(unlock.threshold * 100)}% completion</small>
+              <small>{unlock.explanation}</small>
             </div>
             {unlock.status === "unlocked" ? (
               <button
