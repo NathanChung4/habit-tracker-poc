@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 
@@ -19,6 +20,8 @@ const queryKey = ["today-habits"];
 export function TodayChecklist({ initialItems }: TodayChecklistProps) {
   const queryClient = useQueryClient();
   const router = useRouter();
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const [failedHabitId, setFailedHabitId] = useState<string | null>(null);
 
   const { data: items = [] } = useQuery({
     queryKey,
@@ -39,6 +42,7 @@ export function TodayChecklist({ initialItems }: TodayChecklistProps) {
 
       return response.json();
     },
+    retry: 1,
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<TodayItem[]>(queryKey) ?? [];
@@ -58,10 +62,16 @@ export function TodayChecklist({ initialItems }: TodayChecklistProps) {
 
       return { previous };
     },
-    onError: (_error, _id, context) => {
+    onSuccess: () => {
+      setToggleError(null);
+      setFailedHabitId(null);
+    },
+    onError: (error, id, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKey, context.previous);
       }
+      setToggleError(error instanceof Error ? error.message : "Failed to toggle habit");
+      setFailedHabitId(id);
     },
     onSettled: () => {
       router.refresh();
@@ -80,7 +90,11 @@ export function TodayChecklist({ initialItems }: TodayChecklistProps) {
             <button
               type="button"
               disabled={toggleMutation.isPending}
-              onClick={() => toggleMutation.mutate(item.id)}
+              onClick={() => {
+                setToggleError(null);
+                setFailedHabitId(null);
+                toggleMutation.mutate(item.id);
+              }}
               className={`check-item status-${item.status}`}
             >
               <span className="dot" aria-hidden />
@@ -94,6 +108,24 @@ export function TodayChecklist({ initialItems }: TodayChecklistProps) {
         ))}
         {items.length === 0 ? <li className="empty">No habits scheduled for today.</li> : null}
       </ul>
+      {toggleError ? (
+        <div className="error-row" role="alert">
+          <p className="error-text">{toggleError}</p>
+          {failedHabitId ? (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setToggleError(null);
+                toggleMutation.mutate(failedHabitId);
+              }}
+              disabled={toggleMutation.isPending}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

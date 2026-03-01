@@ -551,99 +551,27 @@ export async function listRewardContracts(client: DbClient, userId: string): Pro
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
-  if (!error) {
-    return (data ?? []).map((row: any) => ({
-      id: row.id,
-      user_id: row.user_id,
-      title: row.title,
-      rule_type: row.rule_type ?? "completion_threshold",
-      threshold: Number(row.threshold ?? 1),
-      is_active: Boolean(row.is_active),
-      created_at: row.created_at
-    }));
-  }
-
-  // Compatibility path for older reward_contracts schema where threshold is embedded in rule_config.
-  if (String((error as any).code ?? "") === "42703") {
-    const legacy = await client
-      .from("reward_contracts")
-      .select("id, user_id, title, rule_type, rule_config, is_active, created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (legacy.error) throw legacy.error;
-
-    return (legacy.data ?? []).map((row: any) => ({
-      id: row.id,
-      user_id: row.user_id,
-      title: row.title,
-      rule_type: row.rule_type ?? "completion_threshold",
-      threshold: Number(row.rule_config?.threshold ?? 1),
-      is_active: Boolean(row.is_active),
-      created_at: row.created_at
-    }));
-  }
-
-  throw error;
+  if (error) throw error;
+  return (data ?? []).map(mapRewardContractRow);
 }
 
 export async function createRewardContract(client: DbClient, userId: string, payload: unknown): Promise<RewardContractRow> {
   const parsed = rewardContractCreateSchema.parse(payload);
 
-  const nextRecord = {
-    user_id: userId,
-    title: parsed.title,
-    rule_type: "completion_threshold",
-    threshold: parsed.threshold,
-    is_active: parsed.isActive
-  };
-
-  const primary = await client
+  const { data, error } = await client
     .from("reward_contracts")
-    .insert(nextRecord)
+    .insert({
+      user_id: userId,
+      title: parsed.title,
+      rule_type: "completion_threshold",
+      threshold: parsed.threshold,
+      is_active: parsed.isActive
+    })
     .select("id, user_id, title, rule_type, threshold, is_active, created_at")
     .single();
 
-  if (!primary.error) {
-    const row: any = primary.data;
-    return {
-      id: row.id,
-      user_id: row.user_id,
-      title: row.title,
-      rule_type: row.rule_type ?? "completion_threshold",
-      threshold: Number(row.threshold ?? 1),
-      is_active: Boolean(row.is_active),
-      created_at: row.created_at
-    };
-  }
-
-  if (String((primary.error as any).code ?? "") === "42703") {
-    const legacy = await client
-      .from("reward_contracts")
-      .insert({
-        user_id: userId,
-        title: parsed.title,
-        rule_type: "completion_threshold",
-        rule_config: { threshold: parsed.threshold },
-        is_active: parsed.isActive
-      })
-      .select("id, user_id, title, rule_type, rule_config, is_active, created_at")
-      .single();
-
-    if (legacy.error) throw legacy.error;
-    const row: any = legacy.data;
-    return {
-      id: row.id,
-      user_id: row.user_id,
-      title: row.title,
-      rule_type: row.rule_type ?? "completion_threshold",
-      threshold: Number(row.rule_config?.threshold ?? 1),
-      is_active: Boolean(row.is_active),
-      created_at: row.created_at
-    };
-  }
-
-  throw primary.error;
+  if (error) throw error;
+  return mapRewardContractRow(data);
 }
 
 export async function updateRewardContract(
@@ -659,7 +587,7 @@ export async function updateRewardContract(
   if (parsed.threshold !== undefined) updatePayload.threshold = parsed.threshold;
   if (parsed.isActive !== undefined) updatePayload.is_active = parsed.isActive;
 
-  const primary = await client
+  const { data, error } = await client
     .from("reward_contracts")
     .update(updatePayload)
     .eq("id", contractId)
@@ -667,47 +595,8 @@ export async function updateRewardContract(
     .select("id, user_id, title, rule_type, threshold, is_active, created_at")
     .single();
 
-  if (!primary.error) {
-    const row: any = primary.data;
-    return {
-      id: row.id,
-      user_id: row.user_id,
-      title: row.title,
-      rule_type: row.rule_type ?? "completion_threshold",
-      threshold: Number(row.threshold ?? 1),
-      is_active: Boolean(row.is_active),
-      created_at: row.created_at
-    };
-  }
-
-  if (String((primary.error as any).code ?? "") === "42703") {
-    const legacyUpdatePayload: Record<string, unknown> = {};
-    if (parsed.title !== undefined) legacyUpdatePayload.title = parsed.title;
-    if (parsed.isActive !== undefined) legacyUpdatePayload.is_active = parsed.isActive;
-    if (parsed.threshold !== undefined) legacyUpdatePayload.rule_config = { threshold: parsed.threshold };
-
-    const legacy = await client
-      .from("reward_contracts")
-      .update(legacyUpdatePayload)
-      .eq("id", contractId)
-      .eq("user_id", userId)
-      .select("id, user_id, title, rule_type, rule_config, is_active, created_at")
-      .single();
-
-    if (legacy.error) throw legacy.error;
-    const row: any = legacy.data;
-    return {
-      id: row.id,
-      user_id: row.user_id,
-      title: row.title,
-      rule_type: row.rule_type ?? "completion_threshold",
-      threshold: Number(row.rule_config?.threshold ?? 1),
-      is_active: Boolean(row.is_active),
-      created_at: row.created_at
-    };
-  }
-
-  throw primary.error;
+  if (error) throw error;
+  return mapRewardContractRow(data);
 }
 
 export async function deleteRewardContract(client: DbClient, userId: string, contractId: string): Promise<void> {
@@ -1179,6 +1068,18 @@ async function getCompletedHabitIdsByDate(
   }
 
   return map;
+}
+
+function mapRewardContractRow(row: any): RewardContractRow {
+  return {
+    id: String(row.id),
+    user_id: String(row.user_id),
+    title: String(row.title),
+    rule_type: String(row.rule_type ?? "completion_threshold"),
+    threshold: Number(row.threshold ?? 1),
+    is_active: Boolean(row.is_active),
+    created_at: String(row.created_at)
+  };
 }
 
 function mapDecisionDiagnosticsSettingsRow(row: any): DecisionDiagnosticsSettings {

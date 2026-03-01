@@ -522,6 +522,13 @@ button.pill.active {
   font-size: 0.88rem;
 }
 
+.error-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .empty {
   color: var(--muted);
   text-align: center;

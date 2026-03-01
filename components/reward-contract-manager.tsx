@@ -19,6 +19,27 @@ interface RewardContractPatchPayload {
   isActive?: boolean;
 }
 
+interface RewardContractCreatePayload {
+  title: string;
+  threshold: number;
+  isActive: boolean;
+}
+
+interface RewardContractPatchRequest {
+  id: string;
+  payload: RewardContractPatchPayload;
+  source: "edit" | "actions";
+}
+
+type ActionRetryState =
+  | { type: "patch"; request: RewardContractPatchRequest }
+  | { type: "delete"; id: string }
+  | null;
+
+interface RewardContractsMutationContext {
+  previous: RewardContractItem[];
+}
+
 export function RewardContractManager({ initialContracts }: { initialContracts: RewardContractItem[] }) {
   const queryClient = useQueryClient();
   const queryKey = ["reward-contracts"];
@@ -38,17 +59,16 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
   const [createError, setCreateError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [createRetryPayload, setCreateRetryPayload] = useState<RewardContractCreatePayload | null>(null);
+  const [editRetryRequest, setEditRetryRequest] = useState<RewardContractPatchRequest | null>(null);
+  const [actionRetry, setActionRetry] = useState<ActionRetryState>(null);
 
   const createMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload: RewardContractCreatePayload) => {
       const response = await fetch("/api/rewards/contracts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          threshold,
-          isActive
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -58,20 +78,23 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
 
       return response.json();
     },
+    retry: 1,
     onSuccess: (result) => {
       queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) => [result.contract, ...current]);
       setTitle("");
       setThreshold(1);
       setIsActive(true);
       setCreateError(null);
+      setCreateRetryPayload(null);
     },
-    onError: (error) => {
+    onError: (error, payload) => {
       setCreateError(error instanceof Error ? error.message : "Could not create reward contract");
+      setCreateRetryPayload(payload);
     }
   });
 
   const patchMutation = useMutation({
-    mutationFn: async ({ id, payload }: { id: string; payload: RewardContractPatchPayload }) => {
+    mutationFn: async ({ id, payload }: RewardContractPatchRequest) => {
       const response = await fetch(`/api/rewards/contracts/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -85,6 +108,28 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
 
       return response.json();
     },
+    retry: 1,
+    onMutate: async (request) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<RewardContractItem[]>(queryKey) ?? [];
+
+      if (request.source === "actions") {
+        queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) =>
+          current.map((contract) =>
+            contract.id === request.id
+              ? {
+                  ...contract,
+                  title: request.payload.title ?? contract.title,
+                  threshold: request.payload.threshold ?? contract.threshold,
+                  is_active: request.payload.isActive ?? contract.is_active
+                }
+              : contract
+          )
+        );
+      }
+
+      return { previous } satisfies RewardContractsMutationContext;
+    },
     onSuccess: (result) => {
       queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) =>
         current.map((contract) => (contract.id === result.contract.id ? result.contract : contract))
@@ -93,14 +138,21 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
         setEditingId(null);
       }
       setEditError(null);
+      setEditRetryRequest(null);
       setActionError(null);
+      setActionRetry(null);
     },
-    onError: (error) => {
+    onError: (error, request, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
       const message = error instanceof Error ? error.message : "Could not update reward contract";
-      if (editingId) {
+      if (request.source === "edit") {
         setEditError(message);
+        setEditRetryRequest(request);
       } else {
         setActionError(message);
+        setActionRetry({ type: "patch", request });
       }
     }
   });
@@ -118,22 +170,51 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
 
       return { id };
     },
+    retry: 1,
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous = queryClient.getQueryData<RewardContractItem[]>(queryKey) ?? [];
+      if (editingId === id) {
+        setEditingId(null);
+        setEditError(null);
+        setEditRetryRequest(null);
+      }
+
+      queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) =>
+        current.filter((contract) => contract.id !== id)
+      );
+
+      return { previous } satisfies RewardContractsMutationContext;
+    },
     onSuccess: ({ id }) => {
       queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) =>
         current.filter((contract) => contract.id !== id)
       );
       setActionError(null);
+      setActionRetry(null);
     },
-    onError: (error) => {
+    onError: (error, id, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
       setActionError(error instanceof Error ? error.message : "Could not delete reward contract");
+      setActionRetry({ type: "delete", id });
     }
   });
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!title.trim()) return;
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) return;
+    const nextThreshold = Math.max(0, Math.min(1, threshold));
+
     setCreateError(null);
-    createMutation.mutate();
+    setCreateRetryPayload(null);
+    createMutation.mutate({
+      title: trimmedTitle,
+      threshold: nextThreshold,
+      isActive
+    });
   };
 
   const startEditing = (contract: RewardContractItem) => {
@@ -141,12 +222,15 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
     setEditTitle(contract.title);
     setEditThreshold(contract.threshold);
     setEditError(null);
+    setEditRetryRequest(null);
     setActionError(null);
+    setActionRetry(null);
   };
 
   const cancelEditing = () => {
     setEditingId(null);
     setEditError(null);
+    setEditRetryRequest(null);
   };
 
   const onEditSubmit = async (event: FormEvent, contract: RewardContractItem) => {
@@ -167,7 +251,21 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
     }
 
     setEditError(null);
-    patchMutation.mutate({ id: contract.id, payload });
+    setEditRetryRequest(null);
+    patchMutation.mutate({ id: contract.id, payload, source: "edit" });
+  };
+
+  const retryLastAction = () => {
+    if (!actionRetry) return;
+
+    if (actionRetry.type === "delete") {
+      setActionError(null);
+      deleteMutation.mutate(actionRetry.id);
+      return;
+    }
+
+    setActionError(null);
+    patchMutation.mutate(actionRetry.request);
   };
 
   return (
@@ -208,9 +306,22 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
           </button>
           <p className="muted">Example: `1.0` means reward unlocks only on a perfect day.</p>
           {createError ? (
-            <p className="error-text" role="alert">
-              {createError}
-            </p>
+            <div className="error-row" role="alert">
+              <p className="error-text">{createError}</p>
+              {createRetryPayload ? (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => {
+                    setCreateError(null);
+                    createMutation.mutate(createRetryPayload);
+                  }}
+                  disabled={createMutation.isPending}
+                >
+                  Retry
+                </button>
+              ) : null}
+            </div>
           ) : null}
         </form>
       </section>
@@ -218,9 +329,19 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
       <section className="panel">
         <h3>Reward Contracts</h3>
         {actionError ? (
-          <p className="error-text" role="alert">
-            {actionError}
-          </p>
+          <div className="error-row" role="alert">
+            <p className="error-text">{actionError}</p>
+            {actionRetry ? (
+              <button
+                type="button"
+                className="ghost"
+                onClick={retryLastAction}
+                disabled={patchMutation.isPending || deleteMutation.isPending}
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
         ) : null}
         <ul className="contract-list">
           {contracts.map((contract) => (
@@ -261,9 +382,22 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
                     </button>
                   </div>
                   {editError ? (
-                    <p className="error-text" role="alert">
-                      {editError}
-                    </p>
+                    <div className="error-row" role="alert">
+                      <p className="error-text">{editError}</p>
+                      {editRetryRequest ? (
+                        <button
+                          type="button"
+                          className="ghost"
+                          onClick={() => {
+                            setEditError(null);
+                            patchMutation.mutate(editRetryRequest);
+                          }}
+                          disabled={patchMutation.isPending}
+                        >
+                          Retry
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
                 </form>
               ) : (
@@ -286,12 +420,15 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
                     <button
                       type="button"
                       className="ghost"
-                      onClick={() =>
+                      onClick={() => {
+                        setActionError(null);
+                        setActionRetry(null);
                         patchMutation.mutate({
                           id: contract.id,
-                          payload: { isActive: !contract.is_active }
-                        })
-                      }
+                          payload: { isActive: !contract.is_active },
+                          source: "actions"
+                        });
+                      }}
                       disabled={patchMutation.isPending || deleteMutation.isPending}
                     >
                       {contract.is_active ? "Pause" : "Activate"}
@@ -299,7 +436,11 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
                     <button
                       type="button"
                       className="ghost"
-                      onClick={() => deleteMutation.mutate(contract.id)}
+                      onClick={() => {
+                        setActionError(null);
+                        setActionRetry(null);
+                        deleteMutation.mutate(contract.id);
+                      }}
                       disabled={patchMutation.isPending || deleteMutation.isPending}
                     >
                       Delete

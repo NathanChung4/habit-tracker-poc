@@ -17,6 +17,7 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
   const router = useRouter();
   const queryKey = ["today-reward-unlocks"];
   const [redeemError, setRedeemError] = useState<string | null>(null);
+  const [failedUnlockId, setFailedUnlockId] = useState<string | null>(null);
 
   const { data: unlocks = [] } = useQuery({
     queryKey,
@@ -37,6 +38,7 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
 
       return { unlockId };
     },
+    retry: 1,
     onSuccess: ({ unlockId }) => {
       queryClient.setQueryData<TodayRewardUnlock[]>(queryKey, (current = []) =>
         current.map((unlock) =>
@@ -49,9 +51,11 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
         )
       );
       setRedeemError(null);
+      setFailedUnlockId(null);
     },
-    onError: (error) => {
+    onError: (error, unlockId) => {
       setRedeemError(error instanceof Error ? error.message : "Failed to redeem reward");
+      setFailedUnlockId(unlockId);
     },
     onSettled: () => {
       router.refresh();
@@ -75,11 +79,12 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
                 className="primary"
                 onClick={() => {
                   setRedeemError(null);
+                  setFailedUnlockId(null);
                   redeemMutation.mutate(unlock.id);
                 }}
                 disabled={redeemMutation.isPending}
               >
-                Redeem
+                {redeemMutation.isPending && redeemMutation.variables === unlock.id ? "Redeeming..." : "Redeem"}
               </button>
             ) : (
               <span className={`tag status-${unlock.status}`}>{unlock.status}</span>
@@ -89,9 +94,22 @@ export function TodayRewardUnlocks({ initialUnlocks }: { initialUnlocks: TodayRe
         {unlocks.length === 0 ? <li className="empty">No active reward contracts yet.</li> : null}
       </ul>
       {redeemError ? (
-        <p className="error-text" role="alert">
-          {redeemError}
-        </p>
+        <div className="error-row" role="alert">
+          <p className="error-text">{redeemError}</p>
+          {failedUnlockId ? (
+            <button
+              type="button"
+              className="ghost"
+              onClick={() => {
+                setRedeemError(null);
+                redeemMutation.mutate(failedUnlockId);
+              }}
+              disabled={redeemMutation.isPending}
+            >
+              Retry
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </section>
   );

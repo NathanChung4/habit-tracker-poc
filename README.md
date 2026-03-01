@@ -19,6 +19,8 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is aligned t
 - Reward unlock engine on `/today` (`reward_unlocks`) based on today completion vs contract threshold
 - Reward redemption flow (`unlocked -> redeemed`) on `/today`
 - Recent redemption history and weekly redeemed count card
+- Mutation error surfaces with retry actions on `/today` and `/rewards`
+- Optimistic pause/delete updates on `/rewards` with rollback on failure
 - Explainable status panel on `/today` (streak + reward status reasons)
 - Consistency event audit stream (`consistency_events`) with dedupe-safe event keys
 - Live-filtered recent decisions panel on `/today` (event type/date filters)
@@ -93,21 +95,13 @@ npm run test
 
 `packages/domain` contains portable schedule/time/streak utilities for future web/mobile reuse.
 
-## Compatibility Cleanup Plan
+## Schema Compatibility
 
-The codebase still contains fallback branches for older rewards schemas (for environments that may not have the newest migrations yet). Keep these fallbacks until all deployed databases are confirmed migrated.
+Rewards data access now assumes the migrated schema (`reward_contracts.threshold`) and no longer supports the legacy `rule_config.threshold` fallback path.
 
-Recommended cleanup sequence:
+Before deploying to an environment, ensure these migrations are applied:
 
-1. Confirm every environment has all migrations applied, including:
-   - `202603010005_phase_c_rewards_compat.sql`
-   - `202603010006_phase_d_habit_logs_idempotency.sql`
-   - `202603010007_phase_d_consistency_events.sql`
-2. Run a short production data check:
-   - `reward_contracts.threshold` is present and populated
-   - no code path still relies on `reward_contracts.rule_config.threshold`
-3. Remove legacy compatibility branches in `lib/data.ts` that catch Postgres `42703` for `reward_contracts`.
-4. Re-run:
-   - `npm run typecheck`
-   - `npm run test`
-   - manual smoke (`/today`, `/rewards`, `/reports`, `/reports/decisions`)
+- `202603010005_phase_c_rewards_compat.sql`
+- `202603010006_phase_d_habit_logs_idempotency.sql`
+- `202603010007_phase_d_consistency_events.sql`
+- `202603010008_phase_d_decision_diagnostics_settings.sql`
