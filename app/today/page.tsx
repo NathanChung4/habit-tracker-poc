@@ -4,6 +4,7 @@ import { ProgressRing } from "@/components/progress-ring";
 import { StatCard } from "@/components/stat-card";
 import { TodayChecklist } from "@/components/today-checklist";
 import { TodayRewardUnlocks } from "@/components/today-reward-unlocks";
+import { RecentDecisionsPanel } from "@/components/recent-decisions-panel";
 
 export default async function TodayPage() {
   const { user, supabase } = await getCurrentUserOrRedirect();
@@ -95,19 +96,7 @@ export default async function TodayPage() {
         </ul>
       </section>
 
-      <section className="panel">
-        <h2>Recent Decisions</h2>
-        <ul className="explanation-list">
-          {dashboard.recentEvents.map((event) => (
-            <li key={event.id}>
-              <strong>{event.eventType}</strong>
-              <small>{event.dateLocal}</small>
-              <p>{event.message}</p>
-            </li>
-          ))}
-          {dashboard.recentEvents.length === 0 ? <li className="empty">No decisions logged yet.</li> : null}
-        </ul>
-      </section>
+      <RecentDecisionsPanel initialEvents={dashboard.recentEvents} />
 
       <section className="panel">
         <h2>Recent Redemptions</h2>

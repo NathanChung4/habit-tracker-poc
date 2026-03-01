@@ -17,6 +17,9 @@ export default async function ReportsPage() {
           <h2>Reports</h2>
           <p>Track daily completion and weekly consistency trends.</p>
         </div>
+        <a href="/reports/decisions" className="pill">
+          Decision Reports
+        </a>
       </header>
       <ReportPanels dailyRows={dailyRows as any} weeklyRows={weeklyRows} />
     </section>

@@ -498,6 +498,13 @@ button.pill.active {
   font-size: 0.86rem;
 }
 
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-bottom: 0.7rem;
+}
+
 .muted {
   color: var(--muted);
   font-size: 0.9rem;
@@ -555,6 +562,10 @@ button.pill.active {
   .daily-report-list li {
     grid-template-columns: 1fr;
     gap: 0.5rem;
+  }
+
+  .filter-row {
+    grid-template-columns: 1fr;
   }
 
   .topbar,
