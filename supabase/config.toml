@@ -1,0 +1,7 @@
+project_id = "patternfinder"
+
+[functions.day-rollover]
+verify_jwt = false
+
+[functions.on-user-created]
+verify_jwt = false
