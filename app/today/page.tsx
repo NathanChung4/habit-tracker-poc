@@ -41,6 +41,12 @@ export default async function TodayPage() {
           hint="A token can preserve streak on a missed threshold day"
           accent="blue"
         />
+        <StatCard
+          label="Weekly redeemed"
+          value={`${dashboard.summary.weeklyRedeemedCount}`}
+          hint="Reward redemptions in the last 7 days"
+          accent="teal"
+        />
       </div>
 
       <TodayChecklist

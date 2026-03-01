@@ -70,6 +70,7 @@ export interface TodayDashboard {
     streakCount: number;
     tokenUsed: boolean;
     threshold: number;
+    weeklyRedeemedCount: number;
   };
 }
 
@@ -189,6 +190,7 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
     listRewardUnlocksForDate(client, userId, dateLocal, activeRewardContracts),
     listRecentRewardHistory(client, userId, 7)
   ]);
+  const weeklyRedeemedCount = await getWeeklyRedeemedCount(client, userId, dateLocal);
 
   const streakState = await computeCurrentStreak(client, userId, profile, habits, dateLocal);
 
@@ -209,7 +211,8 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
       completedCount: completion.completedCount,
       streakCount: streakState.streakCount,
       tokenUsed: streakState.tokenUsed,
-      threshold: STREAK_THRESHOLD
+      threshold: STREAK_THRESHOLD,
+      weeklyRedeemedCount
     }
   };
 }
@@ -644,6 +647,27 @@ async function listRecentRewardHistory(client: DbClient, userId: string, limit: 
     date_local: String(row.date_local),
     redeemed_at: row.redeemed_at ? String(row.redeemed_at) : null
   }));
+}
+
+async function getWeeklyRedeemedCount(client: DbClient, userId: string, todayLocal: string): Promise<number> {
+  const startDate = shiftDateLocal(todayLocal, -6);
+
+  const countQuery = await client
+    .from("reward_unlocks")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("status", "redeemed")
+    .gte("date_local", startDate)
+    .lte("date_local", todayLocal);
+
+  if (countQuery.error) {
+    if (String((countQuery.error as any).code ?? "") === "42P01") {
+      return 0;
+    }
+    throw countQuery.error;
+  }
+
+  return Number(countQuery.count ?? 0);
 }
 
 async function computeCurrentStreak(
