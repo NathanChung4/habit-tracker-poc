@@ -56,6 +56,24 @@ export interface RewardHistoryRow {
   redeemed_at: string | null;
 }
 
+type ConsistencyEventType = "streak_evaluated" | "token_consumed" | "reward_unlocked" | "reward_redeemed";
+
+interface ConsistencyEventRow {
+  id: string;
+  event_type: ConsistencyEventType;
+  date_local: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ConsistencyEventFeedItem {
+  id: string;
+  eventType: ConsistencyEventType;
+  dateLocal: string;
+  createdAt: string;
+  message: string;
+}
+
 export interface TodayHabitItem {
   id: string;
   name: string;
@@ -69,6 +87,7 @@ export interface TodayDashboard {
   habits: TodayHabitItem[];
   rewardUnlocks: RewardUnlockRow[];
   rewardHistory: RewardHistoryRow[];
+  recentEvents: ConsistencyEventFeedItem[];
   summary: {
     completionRate: number;
     scheduledCount: number;
@@ -261,6 +280,31 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
     tokenUsed: streakState.tokenUsed,
     protectionTokens: profile.protection_tokens
   });
+  await recordConsistencyEvent(client, userId, {
+    eventType: "streak_evaluated",
+    dateLocal,
+    eventKey: `streak_evaluated:${dateLocal}`,
+    payload: {
+      completionRate: completion.completionRate,
+      scheduledCount: completion.scheduledCount,
+      completedCount: completion.completedCount,
+      threshold: STREAK_THRESHOLD,
+      streakCount: streakState.streakCount,
+      tokenUsed: streakState.tokenUsed
+    }
+  });
+  if (streakState.tokenUsed) {
+    await recordConsistencyEvent(client, userId, {
+      eventType: "token_consumed",
+      dateLocal,
+      eventKey: `token_consumed:${dateLocal}`,
+      payload: {
+        streakCount: streakState.streakCount,
+        protectionTokens: profile.protection_tokens
+      }
+    });
+  }
+  const recentEvents = await listRecentConsistencyEvents(client, userId, 10);
 
   return {
     profile,
@@ -273,6 +317,7 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
     })),
     rewardUnlocks,
     rewardHistory,
+    recentEvents,
     summary: {
       completionRate: completion.completionRate,
       scheduledCount: completion.scheduledCount,
@@ -593,7 +638,7 @@ export async function redeemRewardUnlock(client: DbClient, userId: string, unloc
     .eq("id", unlockId)
     .eq("user_id", userId)
     .eq("status", "unlocked")
-    .select("id, reward_contract_id, status, redeemed_at")
+    .select("id, reward_contract_id, date_local, status, redeemed_at")
     .maybeSingle();
 
   if (result.error) {
@@ -606,6 +651,16 @@ export async function redeemRewardUnlock(client: DbClient, userId: string, unloc
   if (!result.data) {
     throw new Error("Reward is not redeemable.");
   }
+
+  await recordConsistencyEvent(client, userId, {
+    eventType: "reward_redeemed",
+    dateLocal: String((result.data as any).date_local),
+    eventKey: `reward_redeemed:${unlockId}`,
+    payload: {
+      unlockId,
+      rewardContractId: String((result.data as any).reward_contract_id)
+    }
+  });
 
   return result.data;
 }
@@ -674,6 +729,11 @@ async function refreshRewardUnlocksForDate(
   const existingStatusByContract = new Map<string, string>(
     (existing.data ?? []).map((row: any) => [String(row.reward_contract_id), String(row.status)])
   );
+  const newlyUnlockedContracts = activeContracts.filter((contract) => {
+    const existingStatus = existingStatusByContract.get(contract.id);
+    const computedStatus = completionRate >= contract.threshold ? "unlocked" : "locked";
+    return existingStatus !== "redeemed" && computedStatus === "unlocked" && existingStatus !== "unlocked";
+  });
 
   const rows = activeContracts.map((contract) => {
     const existingStatus = existingStatusByContract.get(contract.id);
@@ -694,6 +754,22 @@ async function refreshRewardUnlocksForDate(
   if (upsertResult.error) {
     throw upsertResult.error;
   }
+
+  await Promise.all(
+    newlyUnlockedContracts.map((contract) =>
+      recordConsistencyEvent(client, userId, {
+        eventType: "reward_unlocked",
+        dateLocal,
+        eventKey: `reward_unlocked:${contract.id}:${dateLocal}`,
+        payload: {
+          rewardContractId: contract.id,
+          title: contract.title,
+          threshold: contract.threshold,
+          completionRate
+        }
+      })
+    )
+  );
 }
 
 async function listRewardUnlocksForDate(
@@ -809,6 +885,67 @@ async function getWeeklyRedeemedCount(client: DbClient, userId: string, todayLoc
   }
 
   return Number(countQuery.count ?? 0);
+}
+
+async function listRecentConsistencyEvents(client: DbClient, userId: string, limit: number): Promise<ConsistencyEventFeedItem[]> {
+  const safeLimit = Math.max(1, Math.min(limit, 20));
+  const result = await client
+    .from("consistency_events")
+    .select("id, event_type, date_local, payload, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(safeLimit);
+
+  if (result.error) {
+    if (String((result.error as any).code ?? "") === "42P01") {
+      return [];
+    }
+    throw result.error;
+  }
+
+  return (result.data ?? []).map((row: any) => {
+    const event: ConsistencyEventRow = {
+      id: String(row.id),
+      event_type: String(row.event_type) as ConsistencyEventType,
+      date_local: String(row.date_local),
+      payload: (row.payload ?? {}) as Record<string, unknown>,
+      created_at: String(row.created_at)
+    };
+
+    return {
+      id: event.id,
+      eventType: event.event_type,
+      dateLocal: event.date_local,
+      createdAt: event.created_at,
+      message: summarizeConsistencyEvent(event)
+    };
+  });
+}
+
+async function recordConsistencyEvent(
+  client: DbClient,
+  userId: string,
+  input: {
+    eventType: ConsistencyEventType;
+    eventKey: string;
+    dateLocal: string;
+    payload: Record<string, unknown>;
+  }
+): Promise<void> {
+  const result = await client.from("consistency_events").upsert(
+    {
+      user_id: userId,
+      date_local: input.dateLocal,
+      event_type: input.eventType,
+      event_key: input.eventKey,
+      payload: input.payload
+    },
+    { onConflict: "user_id,event_key", ignoreDuplicates: true }
+  );
+
+  if (result.error && String((result.error as any).code ?? "") !== "42P01") {
+    throw result.error;
+  }
 }
 
 async function computeCurrentStreak(
@@ -995,4 +1132,24 @@ function buildStreakExplanation(input: {
   }
 
   return `Today is ${completionPercent}%, below ${thresholdPercent}%, and no protection tokens remain.`;
+}
+
+function summarizeConsistencyEvent(event: ConsistencyEventRow): string {
+  switch (event.event_type) {
+    case "streak_evaluated": {
+      const completionPercent = Math.round(Number(event.payload.completionRate ?? 0) * 100);
+      const streakCount = Number(event.payload.streakCount ?? 0);
+      return `Streak evaluated at ${completionPercent}% completion (current streak: ${streakCount} days).`;
+    }
+    case "token_consumed":
+      return "A protection token was consumed to preserve the streak.";
+    case "reward_unlocked": {
+      const title = String(event.payload.title ?? "Reward");
+      return `${title} was unlocked for this day.`;
+    }
+    case "reward_redeemed":
+      return "A reward unlock was redeemed.";
+    default:
+      return "Consistency event recorded.";
+  }
 }

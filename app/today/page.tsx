@@ -96,6 +96,20 @@ export default async function TodayPage() {
       </section>
 
       <section className="panel">
+        <h2>Recent Decisions</h2>
+        <ul className="explanation-list">
+          {dashboard.recentEvents.map((event) => (
+            <li key={event.id}>
+              <strong>{event.eventType}</strong>
+              <small>{event.dateLocal}</small>
+              <p>{event.message}</p>
+            </li>
+          ))}
+          {dashboard.recentEvents.length === 0 ? <li className="empty">No decisions logged yet.</li> : null}
+        </ul>
+      </section>
+
+      <section className="panel">
         <h2>Recent Redemptions</h2>
         <ul className="unlock-list">
           {dashboard.rewardHistory.map((entry) => (
