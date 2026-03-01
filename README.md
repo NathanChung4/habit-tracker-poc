@@ -19,6 +19,10 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is aligned t
 - Reward unlock engine on `/today` (`reward_unlocks`) based on today completion vs contract threshold
 - Reward redemption flow (`unlocked -> redeemed`) on `/today`
 - Recent redemption history and weekly redeemed count card
+- Explainable status panel on `/today` (streak + reward status reasons)
+- Consistency event audit stream (`consistency_events`) with dedupe-safe event keys
+- Live-filtered recent decisions panel on `/today` (event type/date filters)
+- Decision diagnostics report (`/reports/decisions`) with grouped timeline + anomaly flags
 - RLS-enabled tables and ownership-safe queries
 
 ## Intentionally out of scope
@@ -31,6 +35,7 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is aligned t
 - `/today`
 - `/habits`
 - `/reports`
+- `/reports/decisions`
 - `/rewards`
 - `/settings`
 
@@ -41,6 +46,7 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is aligned t
 - `POST /api/day-instances/:id/toggle` (toggles today log for habit id)
 - `GET /api/reports/daily?start&end`
 - `GET /api/reports/weekly?weeks=n`
+- `GET /api/events/consistency?limit&type&from&to`
 - `GET/PATCH /api/settings`
 - `GET/POST /api/rewards/contracts`
 - `PATCH/DELETE /api/rewards/contracts/:id`
@@ -84,3 +90,22 @@ npm run test
 ## Shared domain package
 
 `packages/domain` contains portable schedule/time/streak utilities for future web/mobile reuse.
+
+## Compatibility Cleanup Plan
+
+The codebase still contains fallback branches for older rewards schemas (for environments that may not have the newest migrations yet). Keep these fallbacks until all deployed databases are confirmed migrated.
+
+Recommended cleanup sequence:
+
+1. Confirm every environment has all migrations applied, including:
+   - `202603010005_phase_c_rewards_compat.sql`
+   - `202603010006_phase_d_habit_logs_idempotency.sql`
+   - `202603010007_phase_d_consistency_events.sql`
+2. Run a short production data check:
+   - `reward_contracts.threshold` is present and populated
+   - no code path still relies on `reward_contracts.rule_config.threshold`
+3. Remove legacy compatibility branches in `lib/data.ts` that catch Postgres `42703` for `reward_contracts`.
+4. Re-run:
+   - `npm run typecheck`
+   - `npm run test`
+   - manual smoke (`/today`, `/rewards`, `/reports`, `/reports/decisions`)
