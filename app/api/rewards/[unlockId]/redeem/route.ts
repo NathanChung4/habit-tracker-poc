@@ -1,12 +1,22 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
+import { redeemRewardUnlock } from "@/lib/data";
 
-export async function POST() {
+interface Params {
+  params: Promise<{
+    unlockId: string;
+  }>;
+}
+
+export async function POST(_request: NextRequest, { params }: Params) {
   const auth = await requireApiUser();
   if ("error" in auth) return auth.error;
 
-  return NextResponse.json(
-    { error: "Rewards API is disabled in Phase B. It will return in Phase C." },
-    { status: 410 }
-  );
+  try {
+    const { unlockId } = await params;
+    const redemption = await redeemRewardUnlock(auth.supabase, auth.user.id, unlockId);
+    return NextResponse.json({ redemption });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+  }
 }

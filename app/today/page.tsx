@@ -3,6 +3,7 @@ import { getTodayDashboard } from "@/lib/data";
 import { ProgressRing } from "@/components/progress-ring";
 import { StatCard } from "@/components/stat-card";
 import { TodayChecklist } from "@/components/today-checklist";
+import { TodayRewardUnlocks } from "@/components/today-reward-unlocks";
 
 export default async function TodayPage() {
   const { user, supabase } = await getCurrentUserOrRedirect();
@@ -61,21 +62,14 @@ export default async function TodayPage() {
         </section>
       ) : null}
 
-      <section className="panel">
-        <h2>Today&apos;s Reward Unlocks</h2>
-        <ul className="unlock-list">
-          {dashboard.rewardUnlocks.map((unlock) => (
-            <li key={unlock.id}>
-              <div>
-                <strong>{unlock.title}</strong>
-                <small>Needs {Math.round(unlock.threshold * 100)}% completion</small>
-              </div>
-              <span className={`tag status-${unlock.status}`}>{unlock.status}</span>
-            </li>
-          ))}
-          {dashboard.rewardUnlocks.length === 0 ? <li className="empty">No active reward contracts yet.</li> : null}
-        </ul>
-      </section>
+      <TodayRewardUnlocks
+        initialUnlocks={dashboard.rewardUnlocks.map((unlock) => ({
+          id: unlock.id,
+          title: unlock.title,
+          threshold: unlock.threshold,
+          status: unlock.status
+        }))}
+      />
     </section>
   );
 }

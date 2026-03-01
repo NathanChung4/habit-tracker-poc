@@ -429,6 +429,33 @@ export async function createRewardContract(client: DbClient, userId: string, pay
   throw primary.error;
 }
 
+export async function redeemRewardUnlock(client: DbClient, userId: string, unlockId: string) {
+  const result = await client
+    .from("reward_unlocks")
+    .update({
+      status: "redeemed",
+      redeemed_at: new Date().toISOString()
+    })
+    .eq("id", unlockId)
+    .eq("user_id", userId)
+    .eq("status", "unlocked")
+    .select("id, reward_contract_id, status, redeemed_at")
+    .maybeSingle();
+
+  if (result.error) {
+    if (String((result.error as any).code ?? "") === "42P01") {
+      throw new Error("Rewards schema not ready yet. Run latest migrations.");
+    }
+    throw result.error;
+  }
+
+  if (!result.data) {
+    throw new Error("Reward is not redeemable.");
+  }
+
+  return result.data;
+}
+
 async function computeCompletionForDate(
   client: DbClient,
   userId: string,
