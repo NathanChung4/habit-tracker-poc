@@ -78,4 +78,20 @@ describe("decision analytics", () => {
     expect(anomalies.join(" ")).toContain("High token usage");
     expect(anomalies.join(" ")).toContain("Redeem/unlock mismatch");
   });
+
+  it("respects configurable anomaly thresholds and windows", () => {
+    const anomalies = detectDecisionAnomalies(
+      events,
+      "2026-03-08",
+      {
+        tokenWindowDays: 3,
+        tokenUsageThreshold: 3,
+        rewardWindowDays: 3,
+        streakEvalWindowDays: 1
+      }
+    );
+
+    expect(anomalies.join(" ")).not.toContain("High token usage");
+    expect(anomalies.join(" ")).toContain("No streak evaluation events");
+  });
 });

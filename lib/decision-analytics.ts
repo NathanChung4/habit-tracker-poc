@@ -9,6 +9,13 @@ export interface DecisionDailySummary {
   events: ConsistencyEventFeedItem[];
 }
 
+export interface DecisionAnomalyOptions {
+  tokenWindowDays?: number;
+  tokenUsageThreshold?: number;
+  rewardWindowDays?: number;
+  streakEvalWindowDays?: number;
+}
+
 const EMPTY_COUNTS: Record<EventType, number> = {
   streak_evaluated: 0,
   token_consumed: 0,
@@ -53,30 +60,36 @@ export function countEventsInLastDays(
 
 export function detectDecisionAnomalies(
   events: ConsistencyEventFeedItem[],
-  referenceDateLocal?: string
+  referenceDateLocal?: string,
+  options: DecisionAnomalyOptions = {}
 ): string[] {
   const base = referenceDateLocal ?? inferReferenceDate(events);
   if (!base) return [];
 
-  const tokenConsumesLast7 = countEventsInLastDays(events, "token_consumed", 7, base);
-  const rewardsUnlockedLast14 = countEventsInLastDays(events, "reward_unlocked", 14, base);
-  const rewardsRedeemedLast14 = countEventsInLastDays(events, "reward_redeemed", 14, base);
-  const streakEvaluatedLast2 = countEventsInLastDays(events, "streak_evaluated", 2, base);
+  const tokenWindowDays = sanitizeWindow(options.tokenWindowDays, 7);
+  const tokenUsageThreshold = sanitizeThreshold(options.tokenUsageThreshold, 2);
+  const rewardWindowDays = sanitizeWindow(options.rewardWindowDays, 14);
+  const streakEvalWindowDays = sanitizeWindow(options.streakEvalWindowDays, 2);
+
+  const tokenConsumesInWindow = countEventsInLastDays(events, "token_consumed", tokenWindowDays, base);
+  const rewardsUnlockedInWindow = countEventsInLastDays(events, "reward_unlocked", rewardWindowDays, base);
+  const rewardsRedeemedInWindow = countEventsInLastDays(events, "reward_redeemed", rewardWindowDays, base);
+  const streakEvaluatedInWindow = countEventsInLastDays(events, "streak_evaluated", streakEvalWindowDays, base);
 
   const anomalies: string[] = [];
 
-  if (tokenConsumesLast7 >= 2) {
-    anomalies.push(`High token usage: ${tokenConsumesLast7} token consumes in the last 7 days.`);
+  if (tokenConsumesInWindow >= tokenUsageThreshold) {
+    anomalies.push(`High token usage: ${tokenConsumesInWindow} token consumes in the last ${tokenWindowDays} days.`);
   }
 
-  if (rewardsRedeemedLast14 > rewardsUnlockedLast14) {
+  if (rewardsRedeemedInWindow > rewardsUnlockedInWindow) {
     anomalies.push(
-      `Redeem/unlock mismatch: ${rewardsRedeemedLast14} redeems vs ${rewardsUnlockedLast14} unlocks in the last 14 days.`
+      `Redeem/unlock mismatch: ${rewardsRedeemedInWindow} redeems vs ${rewardsUnlockedInWindow} unlocks in the last ${rewardWindowDays} days.`
     );
   }
 
-  if (streakEvaluatedLast2 === 0) {
-    anomalies.push("No streak evaluation events in the last 2 days.");
+  if (streakEvaluatedInWindow === 0) {
+    anomalies.push(`No streak evaluation events in the last ${streakEvalWindowDays} days.`);
   }
 
   return anomalies;
@@ -91,4 +104,16 @@ function shiftDateLocal(dateLocal: string, deltaDays: number): string {
   const date = new Date(`${dateLocal}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + deltaDays);
   return date.toISOString().slice(0, 10);
+}
+
+function sanitizeWindow(value: number | undefined, fallback: number): number {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return fallback;
+  return Math.max(1, Math.min(60, Math.floor(next)));
+}
+
+function sanitizeThreshold(value: number | undefined, fallback: number): number {
+  const next = Number(value);
+  if (!Number.isFinite(next)) return fallback;
+  return Math.max(1, Math.min(20, Math.floor(next)));
 }

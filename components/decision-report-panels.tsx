@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import type { ConsistencyEventFeedItem } from "@/lib/data";
 import { StatCard } from "@/components/stat-card";
 import {
@@ -8,33 +11,93 @@ import {
 
 export function DecisionReportPanels({ events }: { events: ConsistencyEventFeedItem[] }) {
   const dailyRows = buildDecisionDailySummaries(events);
-  const tokenConsumes7d = countEventsInLastDays(events, "token_consumed", 7);
-  const unlocked14d = countEventsInLastDays(events, "reward_unlocked", 14);
-  const redeemed14d = countEventsInLastDays(events, "reward_redeemed", 14);
-  const anomalies = detectDecisionAnomalies(events);
+  const [tokenWindowDays, setTokenWindowDays] = useState(7);
+  const [tokenUsageThreshold, setTokenUsageThreshold] = useState(2);
+  const [rewardWindowDays, setRewardWindowDays] = useState(14);
+  const [streakEvalWindowDays, setStreakEvalWindowDays] = useState(2);
+
+  const tokenConsumes = countEventsInLastDays(events, "token_consumed", tokenWindowDays);
+  const unlocked = countEventsInLastDays(events, "reward_unlocked", rewardWindowDays);
+  const redeemed = countEventsInLastDays(events, "reward_redeemed", rewardWindowDays);
+  const anomalies = useMemo(
+    () =>
+      detectDecisionAnomalies(events, undefined, {
+        tokenWindowDays,
+        tokenUsageThreshold,
+        rewardWindowDays,
+        streakEvalWindowDays
+      }),
+    [events, tokenWindowDays, tokenUsageThreshold, rewardWindowDays, streakEvalWindowDays]
+  );
 
   return (
     <div className="page">
       <div className="stats-grid">
         <StatCard
-          label="Token uses (7d)"
-          value={`${tokenConsumes7d}`}
-          hint="Protection tokens consumed in the last 7 days"
+          label={`Token uses (${tokenWindowDays}d)`}
+          value={`${tokenConsumes}`}
+          hint={`Token threshold set to ${tokenUsageThreshold}`}
           accent="orange"
         />
         <StatCard
-          label="Unlocked (14d)"
-          value={`${unlocked14d}`}
-          hint="Rewards unlocked in the last 14 days"
+          label={`Unlocked (${rewardWindowDays}d)`}
+          value={`${unlocked}`}
+          hint={`Rewards unlocked in the last ${rewardWindowDays} days`}
           accent="teal"
         />
         <StatCard
-          label="Redeemed (14d)"
-          value={`${redeemed14d}`}
-          hint="Rewards redeemed in the last 14 days"
+          label={`Redeemed (${rewardWindowDays}d)`}
+          value={`${redeemed}`}
+          hint={`Rewards redeemed in the last ${rewardWindowDays} days`}
           accent="blue"
         />
       </div>
+
+      <section className="panel">
+        <h2>Diagnostics Controls</h2>
+        <form className="filter-row" onSubmit={(event) => event.preventDefault()}>
+          <label>
+            Token window (days)
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={tokenWindowDays}
+              onChange={(event) => setTokenWindowDays(Number(event.target.value) || 1)}
+            />
+          </label>
+          <label>
+            Token threshold
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={tokenUsageThreshold}
+              onChange={(event) => setTokenUsageThreshold(Number(event.target.value) || 1)}
+            />
+          </label>
+          <label>
+            Reward window (days)
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={rewardWindowDays}
+              onChange={(event) => setRewardWindowDays(Number(event.target.value) || 1)}
+            />
+          </label>
+          <label>
+            Streak eval window (days)
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={streakEvalWindowDays}
+              onChange={(event) => setStreakEvalWindowDays(Number(event.target.value) || 1)}
+            />
+          </label>
+        </form>
+      </section>
 
       <section className="panel">
         <h2>Anomaly Flags</h2>
