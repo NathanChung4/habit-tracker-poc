@@ -23,6 +23,7 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is aligned t
 - Consistency event audit stream (`consistency_events`) with dedupe-safe event keys
 - Live-filtered recent decisions panel on `/today` (event type/date filters)
 - Decision diagnostics report (`/reports/decisions`) with grouped timeline + anomaly flags
+- Persistent per-user diagnostics settings for decision reports (window + threshold controls)
 - RLS-enabled tables and ownership-safe queries
 
 ## Intentionally out of scope
@@ -47,6 +48,7 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is aligned t
 - `GET /api/reports/daily?start&end`
 - `GET /api/reports/weekly?weeks=n`
 - `GET /api/events/consistency?limit&type&from&to`
+- `GET/PATCH /api/reports/decision-settings`
 - `GET/PATCH /api/settings`
 - `GET/POST /api/rewards/contracts`
 - `PATCH/DELETE /api/rewards/contracts/:id`

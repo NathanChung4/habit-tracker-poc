@@ -1,10 +1,13 @@
 import { getCurrentUserOrRedirect } from "@/lib/auth";
-import { getConsistencyEvents } from "@/lib/data";
+import { getConsistencyEvents, getDecisionDiagnosticsSettings } from "@/lib/data";
 import { DecisionReportPanels } from "@/components/decision-report-panels";
 
 export default async function DecisionReportsPage() {
   const { user, supabase } = await getCurrentUserOrRedirect();
-  const events = await getConsistencyEvents(supabase, user.id, { limit: 50 });
+  const [events, settings] = await Promise.all([
+    getConsistencyEvents(supabase, user.id, { limit: 50 }),
+    getDecisionDiagnosticsSettings(supabase, user.id)
+  ]);
 
   return (
     <section className="page">
@@ -18,7 +21,7 @@ export default async function DecisionReportsPage() {
           Back to Reports
         </a>
       </header>
-      <DecisionReportPanels events={events} />
+      <DecisionReportPanels events={events} initialSettings={settings} />
     </section>
   );
 }

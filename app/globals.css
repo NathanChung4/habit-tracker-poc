@@ -505,6 +505,12 @@ button.pill.active {
   margin-bottom: 0.7rem;
 }
 
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
 .muted {
   color: var(--muted);
   font-size: 0.9rem;

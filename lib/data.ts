@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { expandDatesBetween, getEffectiveLocalDate, getWeekStartDate, shiftDateLocal } from "@patternfinder/domain";
 import {
+  decisionDiagnosticsSettingsPatchSchema,
+  decisionDiagnosticsSettingsSchema,
   habitSchema,
   profileSettingsSchema,
   rewardContractCreateSchema,
@@ -11,12 +13,25 @@ type DbClient = SupabaseClient<any, "public", any>;
 
 const STREAK_THRESHOLD = 0.8;
 const DEFAULT_REPORT_DAYS = 14;
+const DEFAULT_DECISION_DIAGNOSTICS_SETTINGS = {
+  tokenWindowDays: 7,
+  tokenUsageThreshold: 2,
+  rewardWindowDays: 14,
+  streakEvalWindowDays: 2
+} as const;
 
 export interface ProfileRow {
   id: string;
   timezone: string;
   cutoff_time: string;
   protection_tokens: number;
+}
+
+export interface DecisionDiagnosticsSettings {
+  tokenWindowDays: number;
+  tokenUsageThreshold: number;
+  rewardWindowDays: number;
+  streakEvalWindowDays: number;
 }
 
 export interface HabitRow {
@@ -200,6 +215,78 @@ export async function updateProfileSettings(client: DbClient, userId: string, pa
 
   if (error) throw error;
   return data as ProfileRow;
+}
+
+export async function getDecisionDiagnosticsSettings(
+  client: DbClient,
+  userId: string
+): Promise<DecisionDiagnosticsSettings> {
+  const { data, error } = await client
+    .from("decision_diagnostics_settings")
+    .select("user_id, token_window_days, token_usage_threshold, reward_window_days, streak_eval_window_days")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    if (String((error as any).code ?? "") === "42P01") {
+      return { ...DEFAULT_DECISION_DIAGNOSTICS_SETTINGS };
+    }
+    throw error;
+  }
+
+  if (data) {
+    return mapDecisionDiagnosticsSettingsRow(data);
+  }
+
+  const { data: created, error: insertError } = await client
+    .from("decision_diagnostics_settings")
+    .insert({ user_id: userId })
+    .select("user_id, token_window_days, token_usage_threshold, reward_window_days, streak_eval_window_days")
+    .single();
+
+  if (insertError) {
+    if (String((insertError as any).code ?? "") === "42P01") {
+      return { ...DEFAULT_DECISION_DIAGNOSTICS_SETTINGS };
+    }
+    throw insertError;
+  }
+
+  return mapDecisionDiagnosticsSettingsRow(created);
+}
+
+export async function updateDecisionDiagnosticsSettings(
+  client: DbClient,
+  userId: string,
+  payload: unknown
+): Promise<DecisionDiagnosticsSettings> {
+  const parsed = decisionDiagnosticsSettingsPatchSchema.parse(payload);
+  const updatePayload: Record<string, number> = {};
+
+  if (parsed.tokenWindowDays !== undefined) updatePayload.token_window_days = parsed.tokenWindowDays;
+  if (parsed.tokenUsageThreshold !== undefined) updatePayload.token_usage_threshold = parsed.tokenUsageThreshold;
+  if (parsed.rewardWindowDays !== undefined) updatePayload.reward_window_days = parsed.rewardWindowDays;
+  if (parsed.streakEvalWindowDays !== undefined) updatePayload.streak_eval_window_days = parsed.streakEvalWindowDays;
+
+  const { data, error } = await client
+    .from("decision_diagnostics_settings")
+    .upsert(
+      {
+        user_id: userId,
+        ...updatePayload
+      },
+      { onConflict: "user_id" }
+    )
+    .select("user_id, token_window_days, token_usage_threshold, reward_window_days, streak_eval_window_days")
+    .single();
+
+  if (error) {
+    if (String((error as any).code ?? "") === "42P01") {
+      throw new Error("Decision diagnostics settings table is unavailable. Apply the latest migrations.");
+    }
+    throw error;
+  }
+
+  return mapDecisionDiagnosticsSettingsRow(data);
 }
 
 export async function listHabits(client: DbClient, userId: string): Promise<HabitRow[]> {
@@ -1092,6 +1179,21 @@ async function getCompletedHabitIdsByDate(
   }
 
   return map;
+}
+
+function mapDecisionDiagnosticsSettingsRow(row: any): DecisionDiagnosticsSettings {
+  const parsed = decisionDiagnosticsSettingsSchema.safeParse({
+    tokenWindowDays: Number(row.token_window_days),
+    tokenUsageThreshold: Number(row.token_usage_threshold),
+    rewardWindowDays: Number(row.reward_window_days),
+    streakEvalWindowDays: Number(row.streak_eval_window_days)
+  });
+
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  return { ...DEFAULT_DECISION_DIAGNOSTICS_SETTINGS };
 }
 
 function isHabitScheduledOnDate(frequencyType: string, dateLocal: string): boolean {

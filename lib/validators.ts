@@ -42,3 +42,16 @@ export const consistencyEventsQuerySchema = z
   .refine((value) => !value.from || !value.to || value.from <= value.to, {
     message: "from must be less than or equal to to"
   });
+
+export const decisionDiagnosticsSettingsSchema = z.object({
+  tokenWindowDays: z.number().int().min(1).max(60).default(7),
+  tokenUsageThreshold: z.number().int().min(1).max(20).default(2),
+  rewardWindowDays: z.number().int().min(1).max(60).default(14),
+  streakEvalWindowDays: z.number().int().min(1).max(30).default(2)
+});
+
+export const decisionDiagnosticsSettingsPatchSchema = decisionDiagnosticsSettingsSchema
+  .partial()
+  .refine((payload) => Object.keys(payload).length > 0, {
+    message: "At least one field must be provided."
+  });
