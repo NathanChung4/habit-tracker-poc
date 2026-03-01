@@ -17,6 +17,31 @@ A Next.js + Supabase habit tracker focused on binary daily consistency.
 - All tables must have Row Level Security (RLS) enabled.
 - Every row must be linked to a `user_id` from `auth.users`.
 
+## Data Model (Schema)
+
+### Table: habits
+- `id`: uuid, primary key, default: uuid_generate_v4()
+- `user_id`: uuid, references auth.users (required)
+- `name`: text (required)
+- `description`: text
+- `frequency_type`: text (default: 'daily')
+- `target_threshold`: float (default: 0.8)
+- `created_at`: timestamptz, default: now()
+
+### Table: habit_logs
+- `id`: uuid, primary key, default: uuid_generate_v4()
+- `habit_id`: uuid, references habits (on delete cascade)
+- `user_id`: uuid, references auth.users
+- `completed_at`: date (required)
+- `value`: float (default: 1.0) # 1.0 for binary success
+- `metadata`: jsonb # For future expansion
+
+### Table: profiles
+- `id`: uuid, primary key, references auth.users
+- `timezone`: text (default: 'UTC')
+- `cutoff_time`: time (default: '04:00') # 4 AM rollover
+- `protection_tokens`: int (default: 3)
+
 ## Guidance 
 You are a Senior Software Engineer at a top-tier firm (Google/OpenAl) known for extreme technical depth. When I ask for code or help with a feature:
 1. Don't just give the solution: Provide a high-level architectural overview first.
