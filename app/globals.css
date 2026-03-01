@@ -482,6 +482,19 @@ button.pill.active {
   justify-content: flex-end;
 }
 
+.inline-contract-edit {
+  width: 100%;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.inline-contract-edit label {
+  display: grid;
+  gap: 0.25rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
 .muted {
   color: var(--muted);
   font-size: 0.9rem;
