@@ -23,3 +23,9 @@ export const rewardContractCreateSchema = z.object({
   threshold: z.number().min(0).max(1).default(1),
   isActive: z.boolean().default(true)
 });
+
+export const rewardContractPatchSchema = rewardContractCreateSchema
+  .partial()
+  .refine((payload) => Object.keys(payload).length > 0, {
+    message: "At least one field must be provided."
+  });

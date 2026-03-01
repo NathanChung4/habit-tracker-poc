@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { expandDatesBetween, getEffectiveLocalDate, getWeekStartDate, shiftDateLocal } from "@patternfinder/domain";
-import { habitSchema, profileSettingsSchema, rewardContractCreateSchema } from "@/lib/validators";
+import {
+  habitSchema,
+  profileSettingsSchema,
+  rewardContractCreateSchema,
+  rewardContractPatchSchema
+} from "@/lib/validators";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -443,6 +448,75 @@ export async function createRewardContract(client: DbClient, userId: string, pay
   }
 
   throw primary.error;
+}
+
+export async function updateRewardContract(
+  client: DbClient,
+  userId: string,
+  contractId: string,
+  payload: unknown
+): Promise<RewardContractRow> {
+  const parsed = rewardContractPatchSchema.parse(payload);
+  const updatePayload: Record<string, unknown> = {};
+
+  if (parsed.title !== undefined) updatePayload.title = parsed.title;
+  if (parsed.threshold !== undefined) updatePayload.threshold = parsed.threshold;
+  if (parsed.isActive !== undefined) updatePayload.is_active = parsed.isActive;
+
+  const primary = await client
+    .from("reward_contracts")
+    .update(updatePayload)
+    .eq("id", contractId)
+    .eq("user_id", userId)
+    .select("id, user_id, title, rule_type, threshold, is_active, created_at")
+    .single();
+
+  if (!primary.error) {
+    const row: any = primary.data;
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      title: row.title,
+      rule_type: row.rule_type ?? "completion_threshold",
+      threshold: Number(row.threshold ?? 1),
+      is_active: Boolean(row.is_active),
+      created_at: row.created_at
+    };
+  }
+
+  if (String((primary.error as any).code ?? "") === "42703") {
+    const legacyUpdatePayload: Record<string, unknown> = {};
+    if (parsed.title !== undefined) legacyUpdatePayload.title = parsed.title;
+    if (parsed.isActive !== undefined) legacyUpdatePayload.is_active = parsed.isActive;
+    if (parsed.threshold !== undefined) legacyUpdatePayload.rule_config = { threshold: parsed.threshold };
+
+    const legacy = await client
+      .from("reward_contracts")
+      .update(legacyUpdatePayload)
+      .eq("id", contractId)
+      .eq("user_id", userId)
+      .select("id, user_id, title, rule_type, rule_config, is_active, created_at")
+      .single();
+
+    if (legacy.error) throw legacy.error;
+    const row: any = legacy.data;
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      title: row.title,
+      rule_type: row.rule_type ?? "completion_threshold",
+      threshold: Number(row.rule_config?.threshold ?? 1),
+      is_active: Boolean(row.is_active),
+      created_at: row.created_at
+    };
+  }
+
+  throw primary.error;
+}
+
+export async function deleteRewardContract(client: DbClient, userId: string, contractId: string): Promise<void> {
+  const { error } = await client.from("reward_contracts").delete().eq("id", contractId).eq("user_id", userId);
+  if (error) throw error;
 }
 
 export async function redeemRewardUnlock(client: DbClient, userId: string, unlockId: string) {

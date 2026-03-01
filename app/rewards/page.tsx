@@ -12,7 +12,7 @@ export default async function RewardsPage() {
         <div>
           <p className="eyebrow">Phase C</p>
           <h2>Rewards</h2>
-          <p>Create and view reward contracts. Unlock/redeem transitions come in the next increment.</p>
+          <p>Create, pause, and delete reward contracts. Unlock/redeem transitions happen on the Today page.</p>
         </div>
       </header>
       <RewardContractManager initialContracts={contracts} />

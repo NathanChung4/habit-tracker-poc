@@ -414,6 +414,13 @@ button.pill.active {
   gap: 0.8rem;
 }
 
+.contract-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+}
+
 .habit-list p,
 .daily-report-list small,
 .weekly-report-grid p,
@@ -466,6 +473,13 @@ button.pill.active {
 .tag.status-redeemed,
 .tag.status-done {
   background: rgba(46, 95, 173, 0.15);
+}
+
+.contract-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
 }
 
 .muted {

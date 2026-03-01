@@ -54,6 +54,48 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
     }
   });
 
+  const patchMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: { isActive: boolean } }) => {
+      const response = await fetch(`/api/rewards/contracts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: "Could not update reward contract" }));
+        throw new Error(body.error ?? "Could not update reward contract");
+      }
+
+      return response.json();
+    },
+    onSuccess: (result) => {
+      queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) =>
+        current.map((contract) => (contract.id === result.contract.id ? result.contract : contract))
+      );
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/rewards/contracts/${id}`, {
+        method: "DELETE"
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({ error: "Could not delete reward contract" }));
+        throw new Error(body.error ?? "Could not delete reward contract");
+      }
+
+      return { id };
+    },
+    onSuccess: ({ id }) => {
+      queryClient.setQueryData<RewardContractItem[]>(queryKey, (current = []) =>
+        current.filter((contract) => contract.id !== id)
+      );
+    }
+  });
+
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
@@ -105,10 +147,35 @@ export function RewardContractManager({ initialContracts }: { initialContracts: 
         <ul className="contract-list">
           {contracts.map((contract) => (
             <li key={contract.id}>
-              <strong>{contract.title}</strong>
-              <small>
-                {Math.round(contract.threshold * 100)}% threshold • {contract.is_active ? "active" : "inactive"}
-              </small>
+              <div>
+                <strong>{contract.title}</strong>
+                <small>
+                  {Math.round(contract.threshold * 100)}% threshold • {contract.is_active ? "active" : "inactive"}
+                </small>
+              </div>
+              <div className="contract-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() =>
+                    patchMutation.mutate({
+                      id: contract.id,
+                      payload: { isActive: !contract.is_active }
+                    })
+                  }
+                  disabled={patchMutation.isPending || deleteMutation.isPending}
+                >
+                  {contract.is_active ? "Pause" : "Activate"}
+                </button>
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => deleteMutation.mutate(contract.id)}
+                  disabled={patchMutation.isPending || deleteMutation.isPending}
+                >
+                  Delete
+                </button>
+              </div>
             </li>
           ))}
           {contracts.length === 0 ? <li className="empty">No reward contracts yet.</li> : null}

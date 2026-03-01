@@ -1,25 +1,28 @@
 # PatternFinder Habit Consistency POC
 
-Web-first habit tracker built with Next.js + Supabase. The codebase is currently aligned to the Phase B `agents.md` source of truth.
+Web-first habit tracker built with Next.js + Supabase. The codebase is aligned to the `agents.md` source of truth, including Phase C rewards.
 
-## Phase B scope (current)
+## Current scope
 
 - Email/password auth with Supabase
 - Core schema alignment to:
   - `profiles`
   - `habits`
   - `habit_logs`
-- Habit CRUD using Phase B fields:
+- Habit CRUD using schema fields:
   - `name`, `description`, `frequency_type`, `target_threshold`
 - Today checklist using binary completion logs (`habit_logs.value = 1.0`)
 - Timezone + `cutoff_time` based effective day logic
 - 80% streak rule with protection-token aware streak computation
 - Daily and weekly consistency reports computed from habits + logs
+- Reward contracts (`reward_contracts`) create/list/update/delete
+- Reward unlock engine on `/today` (`reward_unlocks`) based on today completion vs contract threshold
+- Reward redemption flow (`unlocked -> redeemed`) on `/today`
+- Recent redemption history and weekly redeemed count card
 - RLS-enabled tables and ownership-safe queries
 
-## Not active in Phase B
+## Intentionally out of scope
 
-- Rewards/contracts APIs and UI are intentionally disabled (Phase C)
 - XP/levels/badges pipeline from earlier scaffolding is not used in this phase
 
 ## Routes
@@ -28,7 +31,7 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is currently
 - `/today`
 - `/habits`
 - `/reports`
-- `/rewards` (placeholder for Phase C)
+- `/rewards`
 - `/settings`
 
 ## API
@@ -39,8 +42,9 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is currently
 - `GET /api/reports/daily?start&end`
 - `GET /api/reports/weekly?weeks=n`
 - `GET/PATCH /api/settings`
-
-Rewards endpoints currently return `410` in Phase B.
+- `GET/POST /api/rewards/contracts`
+- `PATCH/DELETE /api/rewards/contracts/:id`
+- `POST /api/rewards/:unlockId/redeem`
 
 ## Setup
 
