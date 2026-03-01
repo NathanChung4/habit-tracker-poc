@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { expandDatesBetween, getEffectiveLocalDate, getWeekStartDate, shiftDateLocal } from "@patternfinder/domain";
-import { habitSchema, profileSettingsSchema } from "@/lib/validators";
+import { habitSchema, profileSettingsSchema, rewardContractCreateSchema } from "@/lib/validators";
 
 type DbClient = SupabaseClient<any, "public", any>;
 
@@ -353,6 +353,65 @@ export async function listRewardContracts(client: DbClient, userId: string): Pro
   }
 
   throw error;
+}
+
+export async function createRewardContract(client: DbClient, userId: string, payload: unknown): Promise<RewardContractRow> {
+  const parsed = rewardContractCreateSchema.parse(payload);
+
+  const nextRecord = {
+    user_id: userId,
+    title: parsed.title,
+    rule_type: "completion_threshold",
+    threshold: parsed.threshold,
+    is_active: parsed.isActive
+  };
+
+  const primary = await client
+    .from("reward_contracts")
+    .insert(nextRecord)
+    .select("id, user_id, title, rule_type, threshold, is_active, created_at")
+    .single();
+
+  if (!primary.error) {
+    const row: any = primary.data;
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      title: row.title,
+      rule_type: row.rule_type ?? "completion_threshold",
+      threshold: Number(row.threshold ?? 1),
+      is_active: Boolean(row.is_active),
+      created_at: row.created_at
+    };
+  }
+
+  if (String((primary.error as any).code ?? "") === "42703") {
+    const legacy = await client
+      .from("reward_contracts")
+      .insert({
+        user_id: userId,
+        title: parsed.title,
+        rule_type: "completion_threshold",
+        rule_config: { threshold: parsed.threshold },
+        is_active: parsed.isActive
+      })
+      .select("id, user_id, title, rule_type, rule_config, is_active, created_at")
+      .single();
+
+    if (legacy.error) throw legacy.error;
+    const row: any = legacy.data;
+    return {
+      id: row.id,
+      user_id: row.user_id,
+      title: row.title,
+      rule_type: row.rule_type ?? "completion_threshold",
+      threshold: Number(row.rule_config?.threshold ?? 1),
+      is_active: Boolean(row.is_active),
+      created_at: row.created_at
+    };
+  }
+
+  throw primary.error;
 }
 
 async function computeCurrentStreak(

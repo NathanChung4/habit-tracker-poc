@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
-import { listRewardContracts } from "@/lib/data";
+import { createRewardContract, listRewardContracts } from "@/lib/data";
 
 export async function GET() {
   const auth = await requireApiUser();
@@ -14,12 +14,15 @@ export async function GET() {
   }
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   const auth = await requireApiUser();
   if ("error" in auth) return auth.error;
 
-  return NextResponse.json(
-    { error: "POST rewards/contracts is not enabled yet. This Phase C step is read-only." },
-    { status: 405 }
-  );
+  try {
+    const payload = await request.json();
+    const contract = await createRewardContract(auth.supabase, auth.user.id, payload);
+    return NextResponse.json({ contract }, { status: 201 });
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+  }
 }

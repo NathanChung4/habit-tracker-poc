@@ -17,3 +17,9 @@ export const profileSettingsSchema = z.object({
     .transform((value) => (value.length === 5 ? `${value}:00` : value)),
   protectionTokens: z.number().int().min(0).max(20)
 });
+
+export const rewardContractCreateSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  threshold: z.number().min(0).max(1).default(1),
+  isActive: z.boolean().default(true)
+});
