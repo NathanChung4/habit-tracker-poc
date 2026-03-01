@@ -34,6 +34,14 @@ export interface RewardContractRow {
   created_at: string;
 }
 
+export interface RewardUnlockRow {
+  id: string;
+  reward_contract_id: string;
+  title: string;
+  threshold: number;
+  status: "locked" | "unlocked" | "redeemed";
+}
+
 export interface TodayHabitItem {
   id: string;
   name: string;
@@ -45,6 +53,7 @@ export interface TodayDashboard {
   profile: ProfileRow;
   dateLocal: string;
   habits: TodayHabitItem[];
+  rewardUnlocks: RewardUnlockRow[];
   summary: {
     completionRate: number;
     scheduledCount: number;
@@ -164,29 +173,27 @@ export async function getTodayDashboard(client: DbClient, userId: string): Promi
   const profile = await ensureProfile(client, userId);
   const dateLocal = getEffectiveLocalDate(new Date(), profile.timezone, cutoffTimeToMinutes(profile.cutoff_time));
   const habits = await listHabits(client, userId);
-
-  const scheduledHabits = habits.filter((habit) => isHabitScheduledOnDate(habit.frequency_type, dateLocal));
-  const completedHabitIds = await getCompletedHabitIdsForDate(client, userId, dateLocal, scheduledHabits.map((habit) => habit.id));
-
-  const completedCount = scheduledHabits.filter((habit) => completedHabitIds.has(habit.id)).length;
-  const scheduledCount = scheduledHabits.length;
-  const completionRate = scheduledCount > 0 ? completedCount / scheduledCount : 0;
+  const completion = await computeCompletionForDate(client, userId, habits, dateLocal);
+  const activeRewardContracts = (await listRewardContracts(client, userId)).filter((contract) => contract.is_active);
+  await refreshRewardUnlocksForDate(client, userId, dateLocal, completion.completionRate, activeRewardContracts);
+  const rewardUnlocks = await listRewardUnlocksForDate(client, userId, dateLocal, activeRewardContracts);
 
   const streakState = await computeCurrentStreak(client, userId, profile, habits, dateLocal);
 
   return {
     profile,
     dateLocal,
-    habits: scheduledHabits.map((habit) => ({
+    habits: completion.scheduledHabits.map((habit) => ({
       id: habit.id,
       name: habit.name,
       description: habit.description,
-      status: completedHabitIds.has(habit.id) ? "done" : "pending"
+      status: completion.completedHabitIds.has(habit.id) ? "done" : "pending"
     })),
+    rewardUnlocks,
     summary: {
-      completionRate,
-      scheduledCount,
-      completedCount,
+      completionRate: completion.completionRate,
+      scheduledCount: completion.scheduledCount,
+      completedCount: completion.completedCount,
       streakCount: streakState.streakCount,
       tokenUsed: streakState.tokenUsed,
       threshold: STREAK_THRESHOLD
@@ -221,6 +228,8 @@ export async function toggleDayInstance(client: DbClient, userId: string, habitI
 
   if (existingError) throw existingError;
 
+  let status: "pending" | "done";
+
   if ((existingLogs ?? []).length > 0) {
     const { error: deleteError } = await client
       .from("habit_logs")
@@ -230,20 +239,26 @@ export async function toggleDayInstance(client: DbClient, userId: string, habitI
       .eq("completed_at", dateLocal);
 
     if (deleteError) throw deleteError;
+    status = "pending";
+  } else {
+    const { error: insertError } = await client.from("habit_logs").insert({
+      habit_id: habitId,
+      user_id: userId,
+      completed_at: dateLocal,
+      value: 1.0,
+      metadata: { source: "toggle" }
+    });
 
-    return { habitId, dateLocal, status: "pending" as const };
+    if (insertError) throw insertError;
+    status = "done";
   }
 
-  const { error: insertError } = await client.from("habit_logs").insert({
-    habit_id: habitId,
-    user_id: userId,
-    completed_at: dateLocal,
-    value: 1.0,
-    metadata: { source: "toggle" }
-  });
+  const habits = await listHabits(client, userId);
+  const completion = await computeCompletionForDate(client, userId, habits, dateLocal);
+  const activeRewardContracts = (await listRewardContracts(client, userId)).filter((contract) => contract.is_active);
+  await refreshRewardUnlocksForDate(client, userId, dateLocal, completion.completionRate, activeRewardContracts);
 
-  if (insertError) throw insertError;
-  return { habitId, dateLocal, status: "done" as const };
+  return { habitId, dateLocal, status };
 }
 
 export async function getDailyReport(client: DbClient, userId: string, startDate?: string, endDate?: string) {
@@ -412,6 +427,142 @@ export async function createRewardContract(client: DbClient, userId: string, pay
   }
 
   throw primary.error;
+}
+
+async function computeCompletionForDate(
+  client: DbClient,
+  userId: string,
+  habits: HabitRow[],
+  dateLocal: string
+): Promise<{
+  scheduledHabits: HabitRow[];
+  completedHabitIds: Set<string>;
+  scheduledCount: number;
+  completedCount: number;
+  completionRate: number;
+}> {
+  const scheduledHabits = habits.filter((habit) => isHabitScheduledOnDate(habit.frequency_type, dateLocal));
+  const completedHabitIds = await getCompletedHabitIdsForDate(
+    client,
+    userId,
+    dateLocal,
+    scheduledHabits.map((habit) => habit.id)
+  );
+
+  const scheduledCount = scheduledHabits.length;
+  const completedCount = scheduledHabits.filter((habit) => completedHabitIds.has(habit.id)).length;
+  const completionRate = scheduledCount > 0 ? completedCount / scheduledCount : 0;
+
+  return {
+    scheduledHabits,
+    completedHabitIds,
+    scheduledCount,
+    completedCount,
+    completionRate
+  };
+}
+
+async function refreshRewardUnlocksForDate(
+  client: DbClient,
+  userId: string,
+  dateLocal: string,
+  completionRate: number,
+  activeContracts: RewardContractRow[]
+): Promise<void> {
+  if (activeContracts.length === 0) {
+    return;
+  }
+
+  const contractIds = activeContracts.map((contract) => contract.id);
+  const existing = await client
+    .from("reward_unlocks")
+    .select("reward_contract_id, status")
+    .eq("user_id", userId)
+    .eq("date_local", dateLocal)
+    .in("reward_contract_id", contractIds);
+
+  if (existing.error) {
+    // Compatibility path: if table does not exist yet, skip without crashing today page.
+    if (String((existing.error as any).code ?? "") === "42P01") {
+      return;
+    }
+
+    throw existing.error;
+  }
+
+  const existingStatusByContract = new Map<string, string>(
+    (existing.data ?? []).map((row: any) => [String(row.reward_contract_id), String(row.status)])
+  );
+
+  const rows = activeContracts.map((contract) => {
+    const existingStatus = existingStatusByContract.get(contract.id);
+    const computedStatus: "locked" | "unlocked" = completionRate >= contract.threshold ? "unlocked" : "locked";
+
+    return {
+      reward_contract_id: contract.id,
+      user_id: userId,
+      date_local: dateLocal,
+      status: existingStatus === "redeemed" ? "redeemed" : computedStatus
+    };
+  });
+
+  const upsertResult = await client.from("reward_unlocks").upsert(rows, {
+    onConflict: "reward_contract_id,date_local"
+  });
+
+  if (upsertResult.error) {
+    throw upsertResult.error;
+  }
+}
+
+async function listRewardUnlocksForDate(
+  client: DbClient,
+  userId: string,
+  dateLocal: string,
+  activeContracts: RewardContractRow[]
+): Promise<RewardUnlockRow[]> {
+  if (activeContracts.length === 0) {
+    return [];
+  }
+
+  const contractIds = activeContracts.map((contract) => contract.id);
+  const result = await client
+    .from("reward_unlocks")
+    .select("id, reward_contract_id, status")
+    .eq("user_id", userId)
+    .eq("date_local", dateLocal)
+    .in("reward_contract_id", contractIds);
+
+  if (result.error) {
+    if (String((result.error as any).code ?? "") === "42P01") {
+      return activeContracts.map((contract) => ({
+        id: `${contract.id}:${dateLocal}`,
+        reward_contract_id: contract.id,
+        title: contract.title,
+        threshold: contract.threshold,
+        status: "locked"
+      }));
+    }
+
+    throw result.error;
+  }
+
+  const unlockByContract = new Map<string, any>((result.data ?? []).map((row: any) => [String(row.reward_contract_id), row]));
+
+  return activeContracts.map((contract) => {
+    const unlock = unlockByContract.get(contract.id);
+    const rawStatus = String(unlock?.status ?? "locked");
+    const normalizedStatus: "locked" | "unlocked" | "redeemed" =
+      rawStatus === "redeemed" ? "redeemed" : rawStatus === "unlocked" ? "unlocked" : "locked";
+
+    return {
+      id: String(unlock?.id ?? `${contract.id}:${dateLocal}`),
+      reward_contract_id: contract.id,
+      title: contract.title,
+      threshold: contract.threshold,
+      status: normalizedStatus
+    };
+  });
 }
 
 async function computeCurrentStreak(
