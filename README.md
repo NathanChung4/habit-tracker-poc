@@ -15,6 +15,7 @@ Web-first habit tracker built with Next.js + Supabase. The codebase is aligned t
 - Timezone + `cutoff_time` based effective day logic
 - 80% streak rule with protection-token aware streak computation
 - Daily and weekly consistency reports computed from habits + logs
+- Strict query validation on reports APIs (`start/end` date ranges, `weeks` bounds)
 - Reward contracts (`reward_contracts`) create/list/update/delete
 - Reward unlock engine on `/today` (`reward_unlocks`) based on today completion vs contract threshold
 - Reward redemption flow (`unlocked -> redeemed`) on `/today`
@@ -84,12 +85,18 @@ npx supabase@latest db push
 npm run dev
 ```
 
+## Launch
+
+Use the release checklist in `docs/launch-checklist.md` before deploying.
+
 ## Testing
 
 ```bash
 npm run typecheck
 npm run test
 ```
+
+Authenticated e2e flows are in `tests/e2e/rewards-and-diagnostics.spec.ts` and require `E2E_EMAIL` + `E2E_PASSWORD` before running `npm run test:e2e`.
 
 ## Shared domain package
 

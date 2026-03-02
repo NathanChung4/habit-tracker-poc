@@ -55,3 +55,16 @@ export const decisionDiagnosticsSettingsPatchSchema = decisionDiagnosticsSetting
   .refine((payload) => Object.keys(payload).length > 0, {
     message: "At least one field must be provided."
   });
+
+export const reportDailyQuerySchema = z
+  .object({
+    start: z.string().regex(dateLocalRegex, "start must be YYYY-MM-DD").optional(),
+    end: z.string().regex(dateLocalRegex, "end must be YYYY-MM-DD").optional()
+  })
+  .refine((value) => !value.start || !value.end || value.start <= value.end, {
+    message: "start must be less than or equal to end"
+  });
+
+export const reportWeeklyQuerySchema = z.object({
+  weeks: z.number().int().min(1).max(52).default(8)
+});
